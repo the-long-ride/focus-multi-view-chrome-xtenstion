@@ -83,3 +83,10 @@ test('normalizeUrl adds https for domains and uses Google search for plain text'
   assert.equal(MPV.normalizeUrl('hello world'), 'https://www.google.com/search?q=hello%20world');
   assert.equal(MPV.normalizeUrl(''), 'about:blank');
 });
+
+test('shared helpers are dark-only and expose no persisted theme API', () => {
+  assert.equal('DEFAULT_THEME' in MPV, false);
+  assert.equal('normalizeTheme' in MPV, false);
+  assert.equal('applyTheme' in MPV, false);
+  assert.equal('loadTheme' in MPV, false);
+});
