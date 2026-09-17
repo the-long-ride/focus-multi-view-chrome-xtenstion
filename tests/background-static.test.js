@@ -50,6 +50,21 @@ test('worker persists and reconciles live workspace bindings', () => {
   assert.match(js, /markWorkspaceClosedForTab/);
 });
 
+test('duplicate-live detection verifies the old tab still owns the same workspace', () => {
+  assert.match(js, /async function isLiveWorkspaceOwner\(tabId, workspaceId\)/);
+  assert.match(js, /isGridUrl\(tab\?\.url\)/);
+  assert.match(js, /workspaceIdFromGridUrl\(tab\.url\) === workspaceId/);
+  assert.match(js, /await isLiveWorkspaceOwner\(loaded\.activeTabId, loaded\.workspaceId\)/);
+});
+
+test('trusted grid URLs reject unexpected query parameters', () => {
+  const start = js.indexOf('function isGridUrl');
+  const end = js.indexOf('\n}', start) + 2;
+  const block = js.slice(start, end);
+  assert.match(block, /searchParams\.keys/);
+  assert.match(block, /key === 'workspace'/);
+});
+
 test('worker announces readiness over the owning grid port for restart recovery', () => {
   assert.match(js, /port\.postMessage\(\{\s*type:\s*'mpv:background-ready',\s*sessionId\s*\}\)/s);
 });
