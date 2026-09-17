@@ -13,9 +13,10 @@ test('grid exposes explicit enhanced same-host mode control', () => {
 });
 
 test('panes have stable logical ids, frame names, and popup sandbox escape', () => {
-  assert.match(js, /const paneId = crypto\.randomUUID\(\)/);
+  assert.match(js, /options\.paneId \|\| crypto\.randomUUID\(\)/);
   assert.match(js, /focus-pane:\$\{paneId\}/);
   assert.match(js, /allow-popups-to-escape-sandbox/);
+  assert.match(js, /pane-bootstrap\.html/);
 });
 
 test('grid uses a dedicated per-session runtime Port', () => {
@@ -27,12 +28,14 @@ test('grid uses a dedicated per-session runtime Port', () => {
   assert.doesNotMatch(js, /chrome\.runtime\.sendMessage\(\{\s*type:\s*'mpv:session-/);
 });
 
-test('native-like pane controls include back forward and open-native actions', () => {
+test('Back and Forward are universal retained-history actions while native-tab escape remains enhanced', () => {
   assert.match(js, /title = 'Back'/);
   assert.match(js, /title = 'Forward'/);
   assert.match(js, /title = 'Open in native tab'/);
-  assert.match(js, /mpv:pane-command/);
+  assert.match(js, /mpv:history-traverse/);
   assert.match(js, /chrome\.tabs\.create/);
+  assert.match(js, /enhancedButtons:\s*\[nativeBtn\]/);
+  assert.doesNotMatch(js, /enhancedButtons:\s*\[[^\]]*backBtn/);
 });
 
 test('popup candidates are acknowledged over the owning Port only after pane creation', () => {
@@ -47,8 +50,9 @@ test('enhanced mode styles stay inside existing xAI controls', () => {
   assert.match(css, /\.pane-control-action\.enhanced-only\[hidden\]/);
 });
 
-test('enhanced synchronization requires explicit same-host opt-in, not host permission alone', () => {
+test('enhanced synchronization restores durable opt-in and still requires existing permission', () => {
   assert.match(js, /enhancedOptInHostname/);
   assert.match(js, /analysis\.hostname !== enhancedOptInHostname/);
-  assert.match(js, /launchEnhancedHostname/);
+  assert.match(js, /currentWorkspace\.ui\?\.enhancedOptInHostname/);
+  assert.match(js, /chrome\.permissions\.contains\(\{\s*origins:\s*analysis\.origins\s*\}\)/);
 });
