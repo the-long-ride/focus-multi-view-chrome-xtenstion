@@ -21,7 +21,7 @@ test('panes have stable logical ids, frame names, and popup sandbox escape', () 
 
 test('grid uses a dedicated per-session runtime Port', () => {
   assert.match(js, /chrome\.runtime\.connect\(\{\s*name:\s*`mpv-grid:\$\{sessionId\}`\s*\}\)/);
-  assert.match(js, /port\.postMessage/);
+  assert.match(js, /gridPort\.postMessage|portPost\(/);
   assert.match(js, /mpv:session-start/);
   assert.match(js, /mpv:session-update/);
   assert.match(js, /mpv:session-stop/);
