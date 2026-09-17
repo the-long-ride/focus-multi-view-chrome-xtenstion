@@ -145,13 +145,14 @@ async function launchUrls(urls, rememberMainForm = false) {
     return;
   }
 
-  const analysis = MPV.analyzeSameHostUrls(cleanUrls);
-  const enhancedGranted = await requestEnhancedPermissionForLaunch(cleanUrls);
+  const normalizedUrls = cleanUrls.map(MPV.normalizeUrl);
+  const analysis = MPV.analyzeSameHostUrls(normalizedUrls);
+  const enhancedGranted = await requestEnhancedPermissionForLaunch(normalizedUrls);
   const launchEnhancedHostname = enhancedGranted && analysis.eligible ? analysis.hostname : '';
 
   if (rememberMainForm) await chrome.storage.local.set({ paneCount, paneUrls: cleanUrls });
 
-  const workspace = await workspaceStore.create(cleanUrls, {
+  const workspace = await workspaceStore.create(normalizedUrls, {
     ui: { enhancedOptInHostname: launchEnhancedHostname },
   });
   const gridUrl = new URL(chrome.runtime.getURL('grid.html'));
