@@ -379,7 +379,7 @@ function applyWorkspaceState(snapshot, { initial = false } = {}) {
   if (!snapshot || !Array.isArray(snapshot.panes) || !snapshot.panes.length) return;
   currentWorkspace = snapshot;
   workspaceId = snapshot.workspaceId;
-  setEnhancedOptIn(snapshot.ui?.enhancedOptInHostname || enhancedOptInHostname);
+  setEnhancedOptIn(snapshot.ui?.enhancedOptInHostname || '');
 
   const existingById = new Map(panes.map((pane) => [pane.id, pane]));
   const desired = [];
