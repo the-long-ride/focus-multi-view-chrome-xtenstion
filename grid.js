@@ -7,14 +7,20 @@ const COMPAT_RULE_ID = 1;
 const FLOATING_PADDING = 12;
 const FLOATING_GAP = 8;
 const PANE_CONTROL_PADDING = 8;
+const PORT_REQUEST_TIMEOUT_MS = 3000;
+const PORT_RECONNECT_DELAY_MS = 250;
 
 const container = document.getElementById('panesContainer');
 const controlTrigger = document.getElementById('controlTrigger');
 const floatingPanel = document.getElementById('floatingPanel');
 const triggerPaneCount = document.getElementById('triggerPaneCount');
 const addBtn = document.getElementById('addPane');
+const enhancedToggle = document.getElementById('enhancedToggle');
 const compatBtn = document.getElementById('compatToggle');
 const countLabel = document.getElementById('paneCountLabel');
+
+const sessionId = crypto.randomUUID();
+const COMPAT_ORIGINS = { origins: ['http://*/*', 'https://*/*'] };
 
 let panes = [];
 let colSplitters = [];
@@ -29,7 +35,15 @@ let triggerDragState = null;
 let paneControlDragState = null;
 let resizeDragState = null;
 let suppressNextTriggerClick = false;
-const COMPAT_ORIGINS = { origins: ['http://*/*', 'https://*/*'] };
+let enhancedActive = false;
+let enhancedHostname = '';
+let enhancedOptInHostname = sessionStorage.getItem('mpv-enhanced-opt-in-hostname') || '';
+let gridPort = null;
+let gridPortReady = false;
+let gridInitialized = false;
+let reconnectTimer = null;
+let requestSequence = 0;
+const pendingPortRequests = new Map();
 
 function viewportSize() {
   return { width: window.innerWidth, height: window.innerHeight };
@@ -92,8 +106,10 @@ function reloadIframe(iframe) {
 
 function goTo(iframe, urlInput) {
   const target = MPV.normalizeUrl(urlInput.value);
+  urlInput.value = target;
   if (target === iframe.src) reloadIframe(iframe);
   else iframe.src = target;
+  scheduleEnhancedSync();
 }
 
 function computeDims(n) {
@@ -267,6 +283,250 @@ function endPaneControlDrag(event) {
   paneControlDragState = null;
 }
 
+function paneIds() {
+  return panes.map((pane) => pane.id);
+}
+
+function paneUrls() {
+  return panes.map((pane) => pane.urlInput.value || pane.iframe.src);
+}
+
+function sameHostAnalysis() {
+  return MPV.analyzeSameHostUrls(paneUrls());
+}
+
+function setEnhancedOptIn(hostname) {
+  enhancedOptInHostname = String(hostname || '').toLowerCase();
+  if (enhancedOptInHostname) sessionStorage.setItem('mpv-enhanced-opt-in-hostname', enhancedOptInHostname);
+  else sessionStorage.removeItem('mpv-enhanced-opt-in-hostname');
+}
+
+function failPendingPortRequests() {
+  for (const pending of pendingPortRequests.values()) {
+    clearTimeout(pending.timeoutId);
+    pending.resolve({ ok: false, disconnected: true });
+  }
+  pendingPortRequests.clear();
+}
+
+function portPost(message) {
+  if (!gridPort || !gridPortReady) return false;
+  const port = gridPort;
+  try {
+    port.postMessage({ ...message, sessionId });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function portRequest(type, payload = {}) {
+  if (!gridPort || !gridPortReady) return Promise.resolve({ ok: false, disconnected: true });
+  const requestId = `${sessionId}:${++requestSequence}`;
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      pendingPortRequests.delete(requestId);
+      resolve({ ok: false, timeout: true });
+    }, PORT_REQUEST_TIMEOUT_MS);
+    pendingPortRequests.set(requestId, { resolve, timeoutId });
+    if (!portPost({ type, requestId, ...payload })) {
+      clearTimeout(timeoutId);
+      pendingPortRequests.delete(requestId);
+      resolve({ ok: false, disconnected: true });
+    }
+  });
+}
+
+function schedulePortReconnect() {
+  if (reconnectTimer != null) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectGridPort();
+  }, PORT_RECONNECT_DELAY_MS);
+}
+
+function handleGridPortMessage(message) {
+  if (!message || typeof message !== 'object') return;
+  if (message.type === 'mpv:request-result') {
+    const pending = pendingPortRequests.get(message.requestId);
+    if (!pending) return;
+    clearTimeout(pending.timeoutId);
+    pendingPortRequests.delete(message.requestId);
+    pending.resolve(message);
+    return;
+  }
+
+  if (message.type === 'mpv:background-ready' && message.sessionId === sessionId) {
+    gridPortReady = true;
+    if (gridInitialized) syncEnhancedSession().catch(() => {});
+    return;
+  }
+
+  if (message.type === 'mpv:pane-state') {
+    const pane = panes.find((item) => item.id === message.paneId);
+    if (!pane) return;
+    if (message.url) pane.urlInput.value = message.url;
+    pane.wrapper.dataset.title = message.title || '';
+    pane.wrapper.classList.toggle('loading', message.loading === true);
+    if (message.focused) {
+      panes.forEach((item) => item.wrapper.classList.toggle('logical-active', item === pane));
+    }
+    if (message.detached === true || (message.url && enhancedHostname && (() => {
+      try { return new URL(message.url).hostname.toLowerCase() !== enhancedHostname; } catch { return true; }
+    })())) {
+      stopEnhancedSession().catch(() => {});
+      return;
+    }
+    scheduleEnhancedSync();
+    return;
+  }
+
+  if (message.type === 'mpv:popup-candidate' && message.sessionId === sessionId) {
+    handlePopupCandidate(message).catch(() => {
+      portPost({ type: 'mpv:popup-result', candidateId: message.candidateId, accepted: false });
+    });
+  }
+}
+
+function connectGridPort() {
+  if (gridPort) return;
+  try {
+    const port = chrome.runtime.connect({ name: `mpv-grid:${sessionId}` });
+    gridPort = port;
+    gridPortReady = false;
+    port.onMessage.addListener(handleGridPortMessage);
+    port.onDisconnect.addListener(() => {
+      if (gridPort !== port) return;
+      gridPort = null;
+      gridPortReady = false;
+      failPendingPortRequests();
+      enhancedActive = false;
+      enhancedHostname = '';
+      updateEnhancedUi();
+      schedulePortReconnect();
+    });
+  } catch {
+    gridPort = null;
+    gridPortReady = false;
+    schedulePortReconnect();
+  }
+}
+
+function setEnhancedActionsVisible(visible) {
+  panes.forEach((pane) => {
+    pane.enhancedButtons.forEach((button) => { button.hidden = !visible; });
+  });
+  requestAnimationFrame(clampAllPaneControls);
+}
+
+function updateEnhancedUi(analysis = sameHostAnalysis()) {
+  if (!enhancedToggle) return;
+  enhancedToggle.classList.toggle('active', enhancedActive);
+  enhancedToggle.disabled = !analysis.eligible && analysis.reason === 'mixed-host';
+  const label = enhancedToggle.lastElementChild;
+  if (enhancedActive) label.textContent = 'Enhanced: On';
+  else if (analysis.reason === 'mixed-host') label.textContent = 'Enhanced: Mixed hosts';
+  else if (analysis.eligible) label.textContent = 'Enhanced: Off';
+  else label.textContent = 'Enhanced: Off';
+  setEnhancedActionsVisible(enhancedActive);
+}
+
+async function stopEnhancedSession() {
+  const wasActive = enhancedActive;
+  enhancedActive = false;
+  enhancedHostname = '';
+  updateEnhancedUi();
+  if (wasActive && gridPortReady) await portRequest('mpv:session-stop');
+}
+
+async function syncEnhancedSession() {
+  const analysis = sameHostAnalysis();
+  if (!analysis.eligible) {
+    await stopEnhancedSession();
+    updateEnhancedUi(analysis);
+    return false;
+  }
+
+  if (analysis.hostname !== enhancedOptInHostname) {
+    await stopEnhancedSession();
+    updateEnhancedUi(analysis);
+    return false;
+  }
+
+  let granted = false;
+  try { granted = await chrome.permissions.contains({ origins: analysis.origins }); } catch { granted = false; }
+  if (!granted || !gridPortReady) {
+    await stopEnhancedSession();
+    updateEnhancedUi(analysis);
+    return false;
+  }
+
+  if (enhancedActive && enhancedHostname && enhancedHostname !== analysis.hostname) {
+    await stopEnhancedSession();
+  }
+
+  const response = await portRequest(
+    enhancedActive ? 'mpv:session-update' : 'mpv:session-start',
+    enhancedActive
+      ? { paneIds: paneIds() }
+      : { hostname: analysis.hostname, paneIds: paneIds() },
+  );
+
+  enhancedActive = response?.ok === true;
+  enhancedHostname = enhancedActive ? analysis.hostname : '';
+  updateEnhancedUi(analysis);
+  return enhancedActive;
+}
+
+let enhancedSyncTimer = null;
+function scheduleEnhancedSync() {
+  if (!gridInitialized) return;
+  if (enhancedSyncTimer != null) clearTimeout(enhancedSyncTimer);
+  enhancedSyncTimer = setTimeout(() => {
+    enhancedSyncTimer = null;
+    syncEnhancedSession().catch(() => {});
+  }, 0);
+}
+
+async function enableEnhancedFromGesture() {
+  const analysis = sameHostAnalysis();
+  if (!analysis.eligible) {
+    updateEnhancedUi(analysis);
+    return false;
+  }
+
+  let granted = false;
+  try { granted = await chrome.permissions.request({ origins: analysis.origins }); } catch { granted = false; }
+  if (!granted) {
+    updateEnhancedUi(analysis);
+    return false;
+  }
+  setEnhancedOptIn(analysis.hostname);
+  return syncEnhancedSession();
+}
+
+async function sendPaneCommand(paneId, command) {
+  if (!enhancedActive) return false;
+  const response = await portRequest('mpv:pane-command', { paneId, command });
+  return response?.ok === true;
+}
+
+async function handlePopupCandidate(message) {
+  let pane = null;
+  if (enhancedActive && panes.length < MAX_PANES) {
+    const analysis = MPV.analyzeSameHostUrls([...paneUrls(), message.targetUrl]);
+    if (analysis.eligible && analysis.hostname === enhancedHostname) {
+      pane = addPane(message.targetUrl);
+      await syncEnhancedSession();
+    }
+  }
+  portPost({
+    type: 'mpv:popup-result',
+    candidateId: message.candidateId,
+    accepted: Boolean(pane),
+  });
+}
+
 function layoutPanes() {
   const count = panes.length;
   const dims = computeDims(count);
@@ -309,18 +569,21 @@ function layoutPanes() {
   }
 
   updatePaneCountUi();
+  updateEnhancedUi();
   requestAnimationFrame(clampAllPaneControls);
 }
 
 function createPane(url) {
+  const paneId = crypto.randomUUID();
   const wrapper = document.createElement('div');
   wrapper.className = 'pane';
+  wrapper.dataset.paneId = paneId;
 
   const iframe = document.createElement('iframe');
   iframe.className = 'pane-iframe';
-  iframe.name = `pane-${crypto.randomUUID()}`;
+  iframe.name = `focus-pane:${paneId}`;
   iframe.src = MPV.normalizeUrl(url);
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
 
   const control = document.createElement('div');
   control.className = 'pane-control';
@@ -348,9 +611,27 @@ function createPane(url) {
   const urlInput = document.createElement('input');
   urlInput.className = 'pane-url';
   urlInput.type = 'text';
-  urlInput.value = url;
+  urlInput.autocomplete = 'off';
+  urlInput.value = MPV.normalizeUrl(url);
   urlInput.placeholder = 'URL or search';
   urlInput.setAttribute('aria-label', 'Pane URL');
+
+  function enhancedAction(label, title, command) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'pane-control-action enhanced-only';
+    button.hidden = !enhancedActive;
+    button.textContent = label;
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.addEventListener('click', () => { sendPaneCommand(paneId, command).catch(() => {}); });
+    return button;
+  }
+
+  const backBtn = enhancedAction('‹', 'Back', 'back');
+  backBtn.title = 'Back';
+  const forwardBtn = enhancedAction('›', 'Forward', 'forward');
+  forwardBtn.title = 'Forward';
 
   const reloadBtn = document.createElement('button');
   reloadBtn.type = 'button';
@@ -359,6 +640,14 @@ function createPane(url) {
   reloadBtn.title = 'Refresh pane';
   reloadBtn.setAttribute('aria-label', 'Refresh pane');
 
+  const nativeBtn = document.createElement('button');
+  nativeBtn.type = 'button';
+  nativeBtn.className = 'pane-control-action enhanced-only';
+  nativeBtn.hidden = !enhancedActive;
+  nativeBtn.textContent = '↗';
+  nativeBtn.title = 'Open in native tab';
+  nativeBtn.setAttribute('aria-label', 'Open in native tab');
+
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'pane-control-action close';
@@ -366,16 +655,19 @@ function createPane(url) {
   closeBtn.title = 'Close pane';
   closeBtn.setAttribute('aria-label', 'Close pane');
 
-  details.append(urlInput, reloadBtn, closeBtn);
+  details.append(backBtn, forwardBtn, urlInput, reloadBtn, nativeBtn, closeBtn);
   control.append(grip, details);
   wrapper.append(iframe, control);
 
   const pane = {
+    id: paneId,
     wrapper,
     iframe,
     control,
     grip,
     indexLabel,
+    urlInput,
+    enhancedButtons: [backBtn, forwardBtn, nativeBtn],
     controlPosition: { x: PANE_CONTROL_PADDING, y: PANE_CONTROL_PADDING },
   };
 
@@ -388,7 +680,11 @@ function createPane(url) {
   urlInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') goTo(iframe, urlInput);
   });
+  iframe.addEventListener('load', scheduleEnhancedSync);
   reloadBtn.addEventListener('click', () => reloadIframe(iframe));
+  nativeBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: urlInput.value || iframe.src }).catch(() => {});
+  });
   closeBtn.addEventListener('click', () => removePane(wrapper));
 
   return pane;
@@ -396,18 +692,22 @@ function createPane(url) {
 
 function removePane(wrapper) {
   const index = panes.findIndex((pane) => pane.wrapper === wrapper);
-  if (index === -1) return;
+  if (index === -1) return false;
   wrapper.remove();
   panes.splice(index, 1);
   layoutPanes();
+  scheduleEnhancedSync();
+  return true;
 }
 
 function addPane(url) {
-  if (panes.length >= MAX_PANES) return;
+  if (panes.length >= MAX_PANES) return null;
   const pane = createPane(url || '');
   container.appendChild(pane.wrapper);
   panes.push(pane);
   layoutPanes();
+  scheduleEnhancedSync();
+  return pane;
 }
 
 async function enableCompatRules() {
@@ -520,6 +820,7 @@ addBtn.addEventListener('click', () => {
   const url = prompt('Enter URL for new pane:');
   if (url) addPane(url);
 });
+if (enhancedToggle) enhancedToggle.addEventListener('click', () => { enableEnhancedFromGesture().catch(() => {}); });
 compatBtn.addEventListener('click', () => { toggleCompat(); });
 
 document.addEventListener('pointerdown', (event) => {
@@ -543,6 +844,13 @@ window.addEventListener('resize', () => {
   if (!floatingPanel.hidden) requestAnimationFrame(positionFloatingPanel);
 });
 
+window.addEventListener('beforeunload', () => {
+  if (gridPort && gridPortReady && enhancedActive) {
+    try { gridPort.postMessage({ type: 'mpv:session-stop', sessionId }); } catch { /* closing */ }
+  }
+  try { gridPort?.disconnect(); } catch { /* closing */ }
+});
+
 chrome.tabs.getCurrent(async (tab) => {
   currentTabId = tab ? tab.id : null;
   try {
@@ -564,7 +872,11 @@ async function initFloatingUi() {
 }
 
 async function initPanes() {
-  const result = await chrome.storage.session.get(['launchUrls']);
+  const result = await chrome.storage.session.get(['launchUrls', 'launchEnhancedHostname']);
+  if (typeof result.launchEnhancedHostname === 'string' && result.launchEnhancedHostname) {
+    setEnhancedOptIn(result.launchEnhancedHostname);
+  }
+  await chrome.storage.session.remove('launchEnhancedHostname');
   const urls = (Array.isArray(result.launchUrls) && result.launchUrls.length
     ? result.launchUrls
     : ['https://example.com', 'https://github.com']
@@ -572,6 +884,11 @@ async function initPanes() {
   urls.forEach((url) => addPane(url));
 }
 
-Promise.all([initFloatingUi(), initPanes()]).catch((error) => {
+connectGridPort();
+Promise.all([initFloatingUi(), initPanes()]).then(() => {
+  gridInitialized = true;
+  updateEnhancedUi();
+  syncEnhancedSession().catch(() => {});
+}).catch((error) => {
   console.error('Split view initialization failed:', error);
 });

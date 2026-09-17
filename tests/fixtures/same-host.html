@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Focus same-host fixture</title>
+<h1 id="state">Same-host fixture</h1>
+<button id="spa">SPA navigation</button>
+<a id="samePopup" href="/same-host.html?popup=1" target="_blank">Same-host popup</a>
+<a id="crossPopup" href="http://127.0.0.1:8765/same-host.html?cross=1" target="_blank">Cross-host popup</a>
+<script>
+  document.getElementById('spa').addEventListener('click', () => {
+    history.pushState({}, '', `?spa=${Date.now()}`);
+    document.title = `SPA ${Date.now()}`;
+    document.getElementById('state').textContent = location.href;
+  });
+</script>

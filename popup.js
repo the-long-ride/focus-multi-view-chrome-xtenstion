@@ -136,6 +136,18 @@ function buildPaneCountList() {
   }
 }
 
+async function requestEnhancedPermissionForLaunch(urls) {
+  const origins = MPV.sameHostPermissionOrigins(urls);
+  if (!origins.length) return false;
+  const request = { origins };
+  try {
+    if (await chrome.permissions.contains(request)) return true;
+    return await chrome.permissions.request(request);
+  } catch {
+    return false;
+  }
+}
+
 async function launchUrls(urls, rememberMainForm = false) {
   const cleanUrls = urls.map((url) => url.trim()).filter(Boolean).slice(0, MAX_PANES);
   if (cleanUrls.length < 2) {
@@ -143,10 +155,14 @@ async function launchUrls(urls, rememberMainForm = false) {
     return;
   }
 
+  const analysis = MPV.analyzeSameHostUrls(cleanUrls);
+  const enhancedGranted = await requestEnhancedPermissionForLaunch(cleanUrls);
+  const launchEnhancedHostname = enhancedGranted && analysis.eligible ? analysis.hostname : '';
+
   if (rememberMainForm) {
     await chrome.storage.local.set({ paneCount, paneUrls: cleanUrls });
   }
-  await chrome.storage.session.set({ launchUrls: cleanUrls });
+  await chrome.storage.session.set({ launchUrls: cleanUrls, launchEnhancedHostname });
   await chrome.tabs.create({ url: chrome.runtime.getURL('grid.html') });
 }
 
