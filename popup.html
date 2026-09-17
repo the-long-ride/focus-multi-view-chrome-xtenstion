@@ -17,56 +17,25 @@
     </header>
 
     <section class="card launch-card" aria-labelledby="launchTitle">
-      <div class="section-heading">
-        <div>
-          <h2 id="launchTitle">New split view</h2>
-          <p>Open up to 9 sites in one resizable tab.</p>
-        </div>
-      </div>
-
+      <div class="section-heading"><div><h2 id="launchTitle">New split view</h2><p>Open up to 9 sites in one resizable tab.</p></div></div>
       <div class="field-group">
         <label id="paneCountLabel" for="paneCountButton">Number of panes</label>
         <div id="paneCountSelect" class="custom-select">
-          <button
-            id="paneCountButton"
-            class="select-button"
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded="false"
-            aria-labelledby="paneCountLabel paneCountValue"
-          >
-            <span id="paneCountValue">2 panes</span>
-            <span class="select-chevron" aria-hidden="true">⌄</span>
+          <button id="paneCountButton" class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="paneCountLabel paneCountValue">
+            <span id="paneCountValue">2 panes</span><span class="select-chevron" aria-hidden="true">⌄</span>
           </button>
           <div id="paneCountList" class="select-list" role="listbox" tabindex="-1" aria-labelledby="paneCountLabel" hidden></div>
         </div>
       </div>
-
       <div id="urlInputs" class="url-list" aria-live="polite"></div>
       <div id="launchError" class="form-error" role="alert" hidden></div>
       <button id="launch" class="primary-button" type="button">Launch Split View</button>
     </section>
 
     <section class="card templates-card" aria-labelledby="templatesTitle">
-      <div class="section-heading template-heading">
-        <div>
-          <h2 id="templatesTitle">Templates</h2>
-          <p id="templateCount">0 of 10 saved</p>
-        </div>
-        <button id="createTemplate" class="secondary-button compact-button" type="button">+ New</button>
-      </div>
-
+      <div class="section-heading template-heading"><div><h2 id="templatesTitle">Templates</h2><p id="templateCount">0 of 10 saved</p></div><button id="createTemplate" class="secondary-button compact-button" type="button">+ New</button></div>
       <div class="table-wrap">
-        <table id="templatesTable" class="template-table">
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Panes</th>
-              <th scope="col" class="actions-heading">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="templatesBody"></tbody>
-        </table>
+        <table id="templatesTable" class="template-table"><thead><tr><th scope="col">Name</th><th scope="col">Panes</th><th scope="col" class="actions-heading">Actions</th></tr></thead><tbody id="templatesBody"></tbody></table>
         <div id="templatesEmpty" class="empty-state">No templates yet. Save a layout for one-click reuse.</div>
       </div>
     </section>
@@ -74,37 +43,20 @@
 
   <dialog id="templateModal" class="template-modal" aria-labelledby="templateModalTitle">
     <form id="templateForm" method="dialog" novalidate>
-      <header class="modal-header">
-        <div>
-          <div id="templateModalEyebrow" class="eyebrow">Template</div>
-          <h2 id="templateModalTitle">New template</h2>
-        </div>
-        <button id="closeTemplateModal" class="icon-button modal-close" type="button" aria-label="Close template dialog">×</button>
-      </header>
-
+      <header class="modal-header"><div><div id="templateModalEyebrow" class="eyebrow">Template</div><h2 id="templateModalTitle">New template</h2></div><button id="closeTemplateModal" class="icon-button modal-close" type="button" aria-label="Close template dialog">×</button></header>
       <div class="modal-body">
-        <div class="field-group">
-          <label for="templateName">Name</label>
-          <input id="templateName" class="text-input" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Research workspace">
-        </div>
-
-        <div class="template-url-header">
-          <label>URLs</label>
-          <span id="templateUrlCount">2 / 9</span>
-        </div>
+        <div class="field-group"><label for="templateName">Name</label><input id="templateName" class="text-input" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Research workspace"></div>
+        <div class="template-url-header"><label>URLs</label><span id="templateUrlCount">2 / 9</span></div>
         <div id="templateUrlInputs" class="template-url-list"></div>
         <button id="addTemplateUrl" class="secondary-button add-url-button" type="button">+ Add URL</button>
         <div id="templateError" class="form-error" role="alert" hidden></div>
       </div>
-
-      <footer class="modal-footer">
-        <button id="cancelTemplate" class="secondary-button" type="button">Cancel</button>
-        <button id="saveTemplate" class="primary-button modal-save" type="submit">Save Template</button>
-      </footer>
+      <footer class="modal-footer"><button id="cancelTemplate" class="secondary-button" type="button">Cancel</button><button id="saveTemplate" class="primary-button modal-save" type="submit">Save Template</button></footer>
     </form>
   </dialog>
 
   <script src="common.js"></script>
+  <script src="src/workspace/workspace-store.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
