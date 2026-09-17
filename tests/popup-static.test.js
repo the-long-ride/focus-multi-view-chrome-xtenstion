@@ -31,12 +31,14 @@ test('popup CSS uses the xAI dark-only visual system', () => {
   assert.equal(css.includes('[data-theme="dark"]'), false);
 });
 
-test('popup script reads real extension version and persists templates and launch URLs', () => {
+test('popup reads the real extension version, persists templates, and launches durable workspaces', () => {
   assert.match(js, /getManifest\(\)\.version/);
   assert.match(js, /templates/);
-  assert.match(js, /launchUrls/);
+  assert.match(js, /new MPVWorkspaceStore\.WorkspaceStore/);
+  assert.match(js, /workspaceStore\.create/);
+  assert.match(js, /searchParams\.set\(['"]workspace['"]/);
   assert.match(js, /chrome\.storage\.local/);
-  assert.match(js, /chrome\.storage\.session/);
+  assert.doesNotMatch(js, /chrome\.storage\.session\.set\(\{\s*launchUrls/);
 });
 
 test('popup copy and template counter reflect the 9-pane limit', () => {
@@ -71,4 +73,3 @@ test('popup header is structured in 1 line with brand logo and right-aligned ver
   assert.match(css, /\.app-header\s*\{[^}]*display:\s*flex/);
   assert.match(css, /\.version-badge\s*\{[^}]*margin-left:\s*auto/);
 });
-
