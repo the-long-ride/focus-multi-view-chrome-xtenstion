@@ -6,14 +6,14 @@ Repository: `the-long-ride/focus-multi-view-chrome-xtenstion`
 
 ## Goal
 
-When a user closes a Focus Multi View split-view tab and presses `Ctrl + Shift + T`, Chrome should reopen the same Focus workspace and Focus should reconstruct the workspace state instead of starting a fresh split view.
+When a user closes a Focus Multi View split-view tab and presses `Ctrl + Shift + T`, Chrome should reopen the same Focus workspace and Focus should reconstruct that workspace instead of starting fresh.
 
 The restored workspace must preserve:
 
 - every pane that existed when the tab was closed;
 - the current URL of every pane;
 - retained Back/Forward URL history for every pane;
-- the selected history position for every pane;
+- each pane's selected history position;
 - pane order;
 - split-column and split-row sizes;
 - pane-control positions;
@@ -22,105 +22,89 @@ The restored workspace must preserve:
 - compatibility-mode state for that workspace;
 - floating control position and panel visibility.
 
-The feature must remain bounded in storage usage. History must not grow indefinitely.
+History and workspace storage must remain bounded over time.
 
-## Non-goals and restoration boundary
+## Restoration boundary
 
-Focus will restore the browser-visible workspace model, not arbitrary page memory.
+Focus restores the browser-visible workspace model, not arbitrary page memory.
 
-It will not serialize or promise restoration of:
+It does not promise restoration of unsaved cross-origin form contents, JavaScript heap state, DOM mutations that are not represented by a URL, media playback position, inaccessible cross-origin scroll position, page bodies, or authentication state beyond what the browser/site already persists.
 
-- unsaved form contents owned by a cross-origin page;
-- JavaScript heap state;
-- DOM mutations not represented by a URL;
-- media playback position;
-- cross-origin scroll position when Focus cannot legally access it;
-- authentication state beyond what the browser/site already persists;
-- page contents themselves.
-
-If a site is no longer available, requires login, or refuses framing, the pane and its URL/history still restore and the site determines what the iframe displays.
+If a site is unavailable, requires login, or refuses framing, the pane and its retained URL/history still restore; the site determines what the iframe displays.
 
 ## User-visible behavior
 
-### Creating a workspace
+### Stable workspace identity
 
-A new split-view launch creates a stable workspace UUID before opening the grid.
+Every newly launched split view receives a stable workspace UUID before the grid tab opens.
 
-The grid URL becomes:
+The outer tab URL becomes:
 
 ```text
 chrome-extension://<extension-id>/grid.html?workspace=<workspace-id>
 ```
 
-The workspace ID is stable for the lifetime of that workspace.
+Only the opaque workspace UUID is placed in the outer URL. Pane URLs and browsing history are never encoded into it.
 
-### Closing and reopening
+### Close and Ctrl+Shift+T
 
-Chrome continues to own normal tab-close and `Ctrl + Shift + T` behavior. Focus does not replace the shortcut and does not require the `sessions` permission for the core flow.
+Chrome continues to own normal tab-close and `Ctrl + Shift + T` behavior. Focus does not replace the shortcut and does not require the `sessions` permission for this flow.
 
-When Chrome restores the closed outer extension tab, it restores the same `grid.html?workspace=<workspace-id>` URL. Focus reads the workspace ID, loads its persisted snapshot, clears its closed marker, and reconstructs the panes and layout.
+When Chrome restores the closed outer extension tab, it restores the same `grid.html?workspace=<workspace-id>` URL. Focus sees the existing workspace ID, reloads that workspace record, clears its closed marker, and rebuilds the panes and layout.
 
-Closing and restoring the same workspace repeatedly updates the same record. It never creates another workspace copy solely because the user reopened it.
+Repeated close/restore cycles reuse the same workspace record. They do not create duplicate workspaces or duplicate retained history merely because the outer tab was reopened.
 
 ### Back/Forward after restoration
 
-Each pane gets Focus-managed retained history. Back and Forward operate on that retained history even though the original iframe process was destroyed when the outer tab closed.
+Each pane has Focus-managed retained URL history. This history survives destruction of the iframe process when the outer tab closes.
 
-A pane restored at history index `n` opens the URL at index `n`. Back decrements the index and navigates the pane to the stored URL. Forward increments the index and navigates to the stored URL.
+A restored pane opens `history[historyIndex]`. Back moves the index backward and navigates the pane to the stored URL. Forward moves it ahead and navigates to the stored URL.
 
-If the user navigates back and then opens a new URL, the old forward branch is discarded, matching normal browser-history semantics.
+If the user goes Back and then navigates somewhere new, the previous forward branch is discarded, matching normal browser history semantics.
 
 Example:
 
 ```text
-A -> B -> C
-     ^ Back
+[A, B, C]
+    ^
 ```
 
-History remains `[A, B, C]` with index at `B`.
-
-Navigating from `B` to `D` produces:
+Navigating from `B` to `D` becomes:
 
 ```text
 [A, B, D]
        ^
 ```
 
-`C` is discarded.
+## Approved retention limits
 
-## Retention limits
-
-The approved limits are:
-
-- maximum 50 history entries per pane;
+- maximum 50 retained history entries per pane;
 - maximum 20 closed workspaces;
-- maximum 9 panes per workspace, unchanged from the current extension;
-- 6 MiB soft global budget for persisted Focus workspace data.
+- maximum 9 panes per workspace, unchanged;
+- 6 MiB soft budget for Focus workspace-record keys only.
 
-When a pane receives entry 51, the oldest retained history entry is removed and the history index is adjusted.
+When entry 51 is added to a pane, remove the oldest retained entry and adjust `historyIndex`.
 
-Workspace cleanup order:
+Cleanup order:
 
-1. Keep all active workspaces.
+1. Never delete an active workspace.
 2. Keep only the 20 newest closed workspaces.
-3. If workspace storage still exceeds the 6 MiB soft budget, delete the oldest closed workspaces until below budget where possible.
-4. If still above budget, trim oldest pane-history entries while preserving every active pane's current URL and selected history position.
-5. Never delete an active workspace as part of automatic retention cleanup.
+3. If workspace-record keys still exceed 6 MiB, delete the oldest closed workspaces until below budget where possible.
+4. If still oversized, trim oldest retained pane-history entries while preserving every pane's current URL and current history position.
+5. Do not use `unlimitedStorage`.
 
-The implementation should use `chrome.storage.local.getBytesInUse()` for budget checks rather than estimating serialized size manually.
+Budget checks use `chrome.storage.local.getBytesInUse()` for the workspace keys, not the extension's unrelated local settings/templates.
 
-## Persistent data model
+## Data model
 
-Use versioned workspace records stored in `chrome.storage.local` under one key per workspace plus a compact index.
-
-Suggested keys:
+Use versioned records in `chrome.storage.local`, one key per workspace plus a compact index.
 
 ```text
 mpv:workspace:<workspace-id>
 mpv:workspace-index
 ```
 
-Suggested workspace schema:
+Suggested schema:
 
 ```js
 {
@@ -153,184 +137,182 @@ Suggested workspace schema:
       paneId,
       controlPosition: { x, y },
       historyIndex,
-      history: [
-        { url }
-      ]
+      history: [{ url }]
     }
   ]
 }
 ```
 
-Only data necessary to reconstruct Focus state is persisted. Page HTML, cookies, response bodies, arbitrary page text, and DOM state are not persisted.
+The workspace index contains only metadata needed for lookup and cleanup. Page HTML, cookies, authorization data, form values, response bodies, and arbitrary DOM text are never persisted.
 
-The workspace index stores only metadata needed for cleanup and lookup, such as workspace ID, updated time, closed time, and active state. Individual workspace snapshots remain separate to avoid rewriting all workspaces after every navigation.
+## Persistence ownership
 
-## Workspace store module
+After a workspace becomes active, the background service worker is the single durable persistence coordinator for that workspace.
 
-Introduce a focused workspace-store module rather than placing persistence logic directly into `grid.js` or the service worker.
+This avoids lost-update races between `grid.js` and `webNavigation` events.
 
-Responsibilities:
+Responsibilities are split as follows:
 
-- validate and normalize workspace records;
-- create workspace IDs;
-- load/save/delete workspace snapshots;
-- update workspace-index metadata;
-- enforce the 50-entry pane cap;
-- enforce the 20-closed-workspace cap;
-- enforce the 6 MiB soft budget;
-- migrate or reject unsupported schema versions safely;
-- preserve current URLs if malformed or oversized records need trimming.
+- popup: create the initial workspace before opening the grid;
+- grid: render state and send completed UI-state changes through its dedicated Port;
+- service worker: serialize all active workspace mutations, navigation history changes, closed/open lifecycle changes, and persistence;
+- workspace-store module: validation, history mutation helpers, storage access, schema handling, retention cleanup.
 
-The grid and background service worker use this module through explicit operations instead of manipulating raw storage keys independently.
+The service worker maintains a per-workspace mutation queue so two events for the same workspace cannot read the same old snapshot and overwrite each other.
+
+The grid does not directly replace the durable workspace record after registration.
 
 ## Launch flow
 
-The current popup writes transient `launchUrls` data to `chrome.storage.session` and opens `grid.html`. The new flow creates and persists a workspace before opening the grid.
-
-Conceptually:
+Current popup launches rely on transient `chrome.storage.session` values. The new flow persists a workspace first:
 
 ```text
-popup launch
+popup
   -> normalize 2..9 URLs
   -> create workspaceId
-  -> create initial workspace snapshot
+  -> create initial snapshot
   -> persist snapshot
   -> open grid.html?workspace=<workspaceId>
 ```
 
-The initial workspace records one history entry per pane at index 0.
+Each initial pane starts with one retained history entry and index 0.
 
-Transient launch storage can remain temporarily for migration/fallback while the feature is introduced, but restored workspaces must not depend on `launchUrls`.
+Transient launch storage can remain temporarily as a migration/fallback path, but Ctrl+Shift+T restoration must depend on the workspace record, not `launchUrls`.
 
-## Grid initialization
+## Grid startup
 
-On startup, `grid.js` parses `workspace` from its own URL.
+The grid parses `workspace` from its own URL and opens its dedicated background Port.
 
-If the workspace exists and validates:
+The first workspace registration request includes that workspace ID. The service worker:
 
-1. mark it active and attach the current outer tab ID;
-2. restore pane IDs rather than generating new ones;
-3. restore the current URL from each pane's `history[historyIndex]`;
-4. restore layout sizes and pane-control positions;
-5. restore selected Focus UI state;
-6. register the workspace with the background Port session;
-7. persist a refreshed `lastSeenAt` and clear `closedAt`.
+1. validates and loads the workspace;
+2. verifies whether another live tab already owns it;
+3. marks it active for the current tab;
+4. clears `closedAt`;
+5. returns the normalized snapshot to the grid.
 
-If the workspace ID is missing or the record is unrecoverably invalid, use the existing safe launch/default behavior and create a new workspace instead of leaving a broken grid.
+The grid then restores stable pane IDs, pane URLs at their current history indices, layout sizes, control positions, active pane, and agreed UI state.
 
-## Reliable pane/frame identity for all modes
+If the workspace record is missing or unrecoverably invalid, create a fresh safe workspace rather than leaving a broken grid.
 
-History restoration must work even when Enhanced Mode is off. Therefore pane identity cannot depend only on the injected same-host bridge.
+## Duplicate live-tab handling
 
-Each iframe is created through an extension-owned bootstrap document before navigating to the remote target URL.
+The same workspace record must never be mutated simultaneously by two live outer tabs.
 
-Example:
+If `grid.html?workspace=X` opens while workspace X is already owned by another live grid tab, clone X into a new workspace UUID and rewrite the duplicate tab to that new workspace ID.
+
+A Ctrl+Shift+T restore does not clone because the original workspace no longer has a live owner.
+
+## Reliable pane/frame identity in every mode
+
+History capture must work when Enhanced Mode is off, so pane identity cannot depend on same-host script injection.
+
+Each pane iframe starts on an extension-owned bootstrap URL containing only opaque IDs:
 
 ```text
-pane-bootstrap.html?pane=<pane-id>&target=<encoded-url>
+pane-bootstrap.html?workspace=<workspace-id>&pane=<pane-id>
 ```
 
-The iframe element is created once. The bootstrap document immediately performs `location.replace(target)`.
+The remote target URL is not placed in the bootstrap query string.
 
-Because the bootstrap navigation is extension-owned, the background service worker can bind the direct child `frameId` to the stable `paneId` before the frame moves to the remote website. The same direct iframe frame remains associated with the pane across later navigations.
+Flow:
 
-Rules:
+1. grid creates the iframe with the bootstrap URL;
+2. service worker observes the extension-owned direct-child navigation and binds `tabId + frameId` to `workspaceId + paneId`;
+3. bootstrap announces readiness to the parent grid;
+4. grid sends the intended target URL to the bootstrap via a same-extension message/postMessage;
+5. bootstrap uses `location.replace(target)` so the bootstrap page itself does not become retained pane history;
+6. subsequent navigations keep the frame binding for that pane.
 
-- only direct child frames of the grid (`parentFrameId === 0`) can become panes;
-- nested site iframes are ignored;
-- a pane ID can own only one live frame binding per outer tab;
-- stale frame/document bindings are replaced only after validation;
-- bindings are scoped by outer tab ID and workspace ID.
+Only direct children of the grid (`parentFrameId === 0`) can become pane bindings. Nested site iframes are ignored.
 
-Existing Enhanced Mode may continue to add document-level bridge metadata when permission is available, but basic history tracking must not require host injection.
+Existing Enhanced Mode may add document metadata when permission is available, but basic pane history never requires host injection.
 
 ## Navigation tracking
 
-The extension already has the `webNavigation` permission. The service worker uses direct-pane frame bindings to observe pane navigation independently of Enhanced Mode.
+The extension already declares `webNavigation`. The service worker records navigation for bound direct-pane frames.
 
-Track relevant events:
+Use:
 
 - `webNavigation.onCommitted` for normal document navigations;
-- `webNavigation.onHistoryStateUpdated` for History API / SPA URL changes;
-- `webNavigation.onReferenceFragmentUpdated` for same-document fragment changes;
-- relevant load/error events only for pane status, not as extra history entries.
+- `webNavigation.onHistoryStateUpdated` for SPA History API URL changes;
+- `webNavigation.onReferenceFragmentUpdated` for same-document fragment changes.
 
-A navigation recorder normalizes URL events before mutating retained history.
+Load/error events may update pane status but must not create retained history entries by themselves.
 
-### Duplicate suppression
+### Normalization and duplicate suppression
 
-Do not append another retained entry when the new normalized URL is an accidental duplicate of the current retained entry caused by multiple Chrome events for one logical navigation.
+The recorder normalizes URLs before changing retained history.
 
-Reloading the same URL does not create another retained history entry.
+Do not append another retained entry when the new URL equals the current retained URL because of reloads or multiple Chrome events representing one logical navigation.
 
-Redirect chains should settle on the final committed URL without inflating retained history with duplicate consecutive entries. If preserving distinct redirect hops later becomes desirable, that is a separate feature.
+Redirect handling must settle on the effective committed URL without growing the retained stack through duplicate consecutive entries.
 
 ### Traversal intent
 
-Focus-managed Back/Forward sets a short-lived traversal intent for the target pane before navigating it to the stored target URL.
+Focus-managed Back/Forward sends a traversal request for the target pane to the service worker before navigation.
 
-When the expected navigation arrives, the recorder moves `historyIndex` instead of appending a new entry.
+The request identifies the expected target index and URL. When the matching navigation arrives, the service worker updates `historyIndex` instead of appending a new history entry.
 
-Unexpected navigation during a traversal intent cancels that intent and is handled as a new navigation.
+An unexpected navigation cancels the traversal intent and is recorded as a normal new navigation.
 
-## Universal pane Back/Forward
+## Universal Back/Forward controls
 
-Back/Forward becomes a workspace-history capability rather than an Enhanced-Mode-only capability.
+Back/Forward becomes a retained-workspace capability rather than an Enhanced-Mode-only capability.
 
-The buttons may be visible whenever a pane has retained backward/forward history. Enhanced Mode can still use its bridge for richer same-host behavior, but persisted workspace history is authoritative for restore semantics.
+Buttons are enabled based on the retained history index. Navigation may reload the stored URL; the persisted URL stack, not the destroyed iframe's native history stack, is authoritative for post-restore behavior.
 
-This keeps restored history available for mixed-host and basic iframe sessions too.
+Enhanced Mode may still provide richer same-host behavior, but it cannot be required for retained history.
 
-## Snapshot updates
+## Snapshot update rules
 
-Persist after meaningful state changes, using short debouncing/coalescing to avoid excessive writes.
+Persist meaningful completed state changes, coalesced with a short debounce where appropriate.
 
-Meaningful changes include:
+Persist after:
 
-- pane committed navigation;
+- committed pane navigation;
 - SPA/history URL change;
-- history index change;
+- history-index change;
 - pane add/remove;
-- pane reorder if such behavior is added later;
 - splitter resize completion;
 - pane-control drag completion;
-- active pane change;
-- floating-control position change;
-- floating-panel visibility change;
+- active-pane change;
+- floating control move completion;
+- floating-panel open/close;
 - enhanced opt-in change;
 - compatibility-mode change.
 
-Pointer-move events and resize previews must never trigger storage writes. Persist only the completed state.
+Never persist every pointer-move or resize-preview event.
 
-Before tab unload, request one final best-effort flush. Correctness must not rely solely on `beforeunload`; the debounced snapshots during normal use are the durable source of truth.
+`beforeunload` may request one final best-effort flush, but correctness cannot depend on it. Normal completed interactions and navigation events must already be durable.
 
-## Service-worker lifecycle and recovery
+## Service-worker suspension and frame recovery
 
-Manifest V3 service workers can suspend, so live state must be reconstructible.
-
-Persist lightweight live bindings in `chrome.storage.session`:
+Manifest V3 service workers can suspend. Persist lightweight live frame bindings in `chrome.storage.session`:
 
 ```text
 outerTabId -> workspaceId -> paneId -> frameId/documentId/currentUrl
 ```
 
-On service-worker startup or wake:
+After service-worker startup/wake:
 
-1. reload the session binding map;
-2. validate outer grid tabs that still exist;
-3. use `webNavigation.getAllFrames()` where needed to validate frame existence;
-4. discard bindings for removed tabs or frames;
-5. notify connected grid Ports if a pane needs rebinding.
+1. reload session bindings;
+2. validate live outer grid tabs;
+3. validate stored frame IDs with `webNavigation.getAllFrames()` where needed;
+4. discard stale bindings;
+5. notify the owning grid Port of unresolved panes.
 
-If a pane binding cannot be recovered, the grid reloads that pane through the extension bootstrap using its current retained URL. That re-establishes identity at the cost of reloading only that pane rather than losing workspace tracking.
+If a pane binding cannot be recovered, reload only that pane through the extension bootstrap at its current retained URL to establish a new frame binding.
+
+Loss of in-memory worker state must not lose the durable workspace snapshot.
 
 ## Closed workspace lifecycle
 
-The service worker maintains `tabId -> workspaceId` for live grid tabs.
+The service worker maintains `tabId -> workspaceId` for active grid tabs.
 
-On grid registration:
+On registration:
 
-- set `activeTabId` to the current tab;
+- set `activeTabId`;
 - clear `closedAt`;
 - update `lastSeenAt`.
 
@@ -338,141 +320,128 @@ On `tabs.onRemoved` for a known grid tab:
 
 - set `activeTabId = null`;
 - set `closedAt = Date.now()`;
-- flush index metadata;
+- persist index metadata;
 - run retention cleanup.
 
-If Chrome exits or crashes before `tabs.onRemoved` is observed, startup reconciliation queries currently open grid tabs. Workspace records marked active but with no matching live grid tab are converted to closed records using `lastSeenAt`/current reconciliation time.
+If Chrome exits or crashes before this event is observed, startup reconciliation queries currently open grid tabs. A workspace marked active with no matching live grid tab is converted to a closed record using its last-seen/reconciliation time.
 
-When `Ctrl + Shift + T` restores the tab, the same workspace ID is registered again and the record becomes active instead of creating a duplicate.
+When Chrome later restores the outer URL with Ctrl+Shift+T, the same workspace becomes active again.
 
-## Compatibility mode restoration
+## Compatibility mode restore
 
-Compatibility mode uses session DNR rules scoped to the outer tab ID. Since a restored Chrome tab receives a new tab ID, its old rule cannot simply survive as-is.
+Compatibility mode uses session DNR rules scoped to an outer tab ID. A restored tab gets a new tab ID, so its previous rule cannot simply be reused.
 
-If the workspace snapshot says compatibility mode was enabled and the required permission still exists, the restored grid recreates the session rule for the new outer tab ID.
+If the workspace says Compatibility was On and the required permission is still granted, recreate the session DNR rule for the new outer tab ID.
 
-If permission is no longer present, the workspace remains restored but Compatibility is shown Off rather than prompting without a user gesture.
+If permission is no longer granted, restore all workspace state but show Compatibility Off. Do not prompt for permission without a user gesture.
 
-## Enhanced mode restoration
+## Enhanced mode restore
 
-Persist the workspace's enhanced opt-in hostname, but do not bypass Chrome permission rules.
+Persist the workspace's enhanced opt-in hostname.
 
-On restore:
+On restore, Enhanced Mode may reactivate only when:
 
-- if the workspace URLs still satisfy exact-host eligibility;
-- and the saved opt-in hostname still matches;
-- and the necessary host permission is still granted;
-- then Enhanced Mode may reactivate automatically.
+- current pane URLs still satisfy exact-host eligibility;
+- the saved opt-in hostname matches;
+- the required host permission is still granted.
 
-If any condition fails, restore the workspace in basic mode without losing panes or retained history.
-
-## Multiple simultaneous workspaces
-
-Every outer grid tab has a different stable workspace ID.
-
-All background routing and persistence is scoped by both outer tab ID and workspace ID. The existing dedicated grid Port/session model remains the communication boundary so updates for one Focus tab cannot mutate another workspace.
-
-A workspace ID already active in one live tab must not silently attach to a second live tab. If Chrome or a user duplicates the extension URL while the original workspace is still active, create a cloned workspace with a new UUID rather than letting two tabs race on the same persistent record.
-
-A Ctrl+Shift+T restore is distinguishable because the original workspace no longer has a live tab association.
+Otherwise restore in basic mode without losing pane/history state.
 
 ## Corruption and schema handling
 
-All loaded records are validated.
+All workspace records are validated before use.
 
-Recovery priorities:
+Recovery order:
 
-1. preserve the workspace when safe;
-2. discard only malformed pane fields where possible;
+1. preserve a workspace when safe;
+2. discard only malformed fields/panes where possible;
 3. preserve each pane's valid current URL;
 4. clamp invalid history indices;
-5. cap excessive history at 50 entries;
-6. discard unsupported future schema versions rather than guessing their meaning.
+5. cap excessive history to 50 entries;
+6. reject unsupported future schema versions instead of guessing their meaning.
 
-If no valid panes remain, create a safe default workspace instead of crashing the grid.
+If no valid panes remain, create a safe default workspace rather than crashing the grid.
 
 ## Security and privacy
 
-Persisted workspace history is local extension data and may contain sensitive URLs.
+Persisted URLs may be sensitive.
 
 Requirements:
 
-- store only URL/navigation metadata required for restoration;
-- do not store page bodies, credentials, cookies, authorization headers, DOM text, or form values;
-- never place pane history into the outer grid query string;
-- keep only the opaque workspace UUID in `grid.html?workspace=...`;
-- enforce the bounded retention limits automatically;
-- do not add `unlimitedStorage` for this feature;
-- do not broaden optional host permissions for restoration.
+- store only URL/navigation metadata needed for restoration;
+- never store page bodies, credentials, cookies, authorization headers, DOM text, or form values;
+- never put pane URLs/history in the outer grid query string;
+- bootstrap query strings contain only workspace/pane IDs, not target URLs;
+- retain at most 50 entries per pane and 20 closed workspaces;
+- enforce the 6 MiB soft workspace budget;
+- do not add `unlimitedStorage`;
+- do not broaden optional host permissions for this feature.
 
 ## Testing strategy
 
 ### Unit tests
 
-Cover pure workspace/history behavior:
+Cover:
 
 - workspace schema validation;
-- 50-entry pane-history cap;
-- correct index adjustment after trimming oldest entries;
-- backward and forward traversal;
-- forward-branch truncation after new navigation;
-- duplicate consecutive URL suppression;
-- reload suppression;
-- SPA URL recording;
-- fragment URL recording;
-- malformed record recovery;
+- 50-entry cap and index adjustment;
+- backward/forward traversal;
+- forward-branch truncation;
+- duplicate/reload suppression;
+- SPA and fragment history mutation;
+- malformed-record recovery;
 - 20-closed-workspace cleanup;
-- active workspaces never removed by cleanup;
+- active-workspace protection;
 - byte-budget cleanup ordering;
-- workspace clone behavior when the same ID is already active.
+- serialized per-workspace mutation ordering;
+- clone behavior for duplicate live workspace URLs.
 
 ### Static integration tests
 
-Cover wiring:
+Cover:
 
-- popup creates workspace before opening grid;
-- grid URL contains only `workspace=<uuid>` and not pane URLs;
-- grid restores stable pane IDs;
-- pane bootstrap resource exists and redirects with `location.replace`;
-- service worker tracks direct child frames only;
-- service worker listens to committed/history-state/fragment navigation events;
+- popup creates a workspace before opening grid;
+- outer grid URL contains only a workspace UUID;
+- stable pane IDs restore;
+- bootstrap URL contains no target URL;
+- bootstrap uses `location.replace()` after receiving its target;
+- only direct child frames register as panes;
+- committed/history-state/fragment navigation listeners are present;
 - tab-close lifecycle updates closed metadata;
-- grid Port messages are workspace-scoped;
-- compatibility mode is rebound to the restored tab ID;
-- no `unlimitedStorage` permission is added.
+- grid Port routing is workspace-scoped;
+- compatibility rules rebind to restored tab IDs;
+- `unlimitedStorage` is not added.
 
-### Browser acceptance checklist
+### Manual Chrome acceptance checklist
 
-Manually verify in Chrome:
-
-1. Open a 2-pane workspace, navigate several pages in each pane, resize the split, move controls, close the outer tab, press `Ctrl + Shift + T`, and confirm state restoration.
-2. Verify pane Back/Forward traverses retained pre-close URLs.
-3. Repeat with 9 panes.
-4. Navigate more than 50 URLs in one pane and confirm only the newest 50 remain.
-5. Go Back and then navigate to a new URL; confirm the prior forward branch is gone.
-6. Confirm reload does not grow retained history.
-7. Confirm SPA `pushState` and fragment changes are retained once each.
-8. Restore a mixed-host/basic-mode workspace and confirm history still works.
-9. Restore an enhanced same-host workspace with permission still granted.
-10. Restore one after removing its host permission and confirm safe basic-mode fallback.
-11. Restore compatibility mode and confirm the DNR rule is rebound to the new tab ID.
-12. Kill/restart the service worker while a workspace is open and confirm pane tracking recovers.
-13. Open multiple Focus workspaces, close one, restore it, and confirm the other workspace is unchanged.
-14. Duplicate a live `grid.html?workspace=...` tab and confirm it receives a cloned workspace ID rather than sharing mutable state.
-15. Accumulate more than 20 closed workspaces and verify oldest closed records are removed while active workspaces remain.
+1. Open two panes, navigate several URLs in each, resize the split, move controls, close the outer tab, press Ctrl+Shift+T, and confirm the workspace restores.
+2. Confirm Back/Forward traverses retained URLs from before closure.
+3. Repeat with nine panes.
+4. Exceed 50 URLs in one pane and confirm the oldest entries are removed.
+5. Go Back then navigate somewhere new; confirm the prior forward branch disappears.
+6. Reload repeatedly and confirm retained history does not grow.
+7. Confirm SPA `pushState` and fragment changes are recorded once each.
+8. Restore mixed-host/basic-mode panes and confirm retained history still works.
+9. Restore an eligible enhanced same-host workspace with permission still granted.
+10. Remove enhanced host permission before restore and confirm safe basic-mode fallback.
+11. Restore Compatibility mode and confirm its DNR rule binds to the new tab ID.
+12. Restart the service worker while a workspace is open and confirm frame tracking recovers.
+13. Keep multiple Focus workspaces open, close/restore one, and confirm the others are unchanged.
+14. Duplicate a live workspace URL and confirm the duplicate receives a cloned workspace UUID.
+15. Create more than 20 closed workspaces and confirm oldest closed records are removed while active records remain.
 
 ## Acceptance criteria
 
 The feature is complete when:
 
-- closing a Focus split-view tab and pressing `Ctrl + Shift + T` reconstructs the same workspace by stable workspace ID;
-- every pane restores its current retained URL;
-- Back/Forward history survives the close/restore cycle for up to 50 entries per pane;
+- Ctrl+Shift+T restores the same Focus workspace by stable workspace ID;
+- every pane returns to its current retained URL;
+- Back/Forward URL history survives close/restore for up to 50 entries per pane;
 - layout and agreed Focus UI state restore;
-- mixed-host/basic-mode panes are tracked without requiring host injection;
-- repeated close/restore cycles do not create duplicate workspace records;
-- at most 20 closed workspaces are retained;
-- persisted workspace data is kept under the 6 MiB soft budget where cleanup can achieve that without deleting active workspaces;
+- history tracking works in mixed-host/basic mode without host injection;
+- repeated close/restore cycles do not duplicate workspace records;
+- no more than 20 closed workspaces are retained;
+- workspace-record storage stays under the 6 MiB soft budget where cleanup can achieve that without deleting active workspaces;
 - service-worker suspension does not permanently break pane tracking;
-- multiple Focus workspaces remain isolated;
-- no page contents or credentials are persisted.
+- multiple workspaces remain isolated;
+- no page content or credentials are persisted.
