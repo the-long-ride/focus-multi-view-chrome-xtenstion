@@ -19,12 +19,15 @@ test('unregistered pane id cannot claim a frame', () => {
   assert.equal(registry.bindBootstrap({ tabId: 7, frameId: 3, documentId: 'd', workspaceId: 'w', paneId: 'other' }), null);
 });
 
-test('conflicting frame and pane claims are rejected', () => {
+test('conflicting frame claims are rejected while the same pane can safely rebind', () => {
   const registry = new WorkspaceFrameRegistry();
   registry.registerWorkspace({ tabId: 7, workspaceId: 'w', paneIds: ['a', 'b'] });
   assert.ok(registry.bindBootstrap({ tabId: 7, frameId: 3, documentId: 'd1', workspaceId: 'w', paneId: 'a' }));
   assert.equal(registry.bindBootstrap({ tabId: 7, frameId: 3, documentId: 'd2', workspaceId: 'w', paneId: 'b' }), null);
-  assert.equal(registry.bindBootstrap({ tabId: 7, frameId: 4, documentId: 'd3', workspaceId: 'w', paneId: 'a' }), null);
+  const rebound = registry.bindBootstrap({ tabId: 7, frameId: 4, documentId: 'd3', workspaceId: 'w', paneId: 'a' });
+  assert.equal(rebound.frameId, 4);
+  assert.equal(registry.findPaneByFrame(7, 3), null);
+  assert.equal(registry.findPaneByFrame(7, 4).paneId, 'a');
 });
 
 test('replacePaneIds removes bindings for deleted panes', () => {
