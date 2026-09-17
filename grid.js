@@ -6,6 +6,7 @@ const MIN_TRACK_PX = 120;
 const COMPAT_RULE_ID = 1;
 const FLOATING_PADDING = 12;
 const FLOATING_GAP = 8;
+const PANE_CONTROL_PADDING = 8;
 
 const container = document.getElementById('panesContainer');
 const controlTrigger = document.getElementById('controlTrigger');
@@ -24,7 +25,9 @@ let colSizes = [1];
 let rowSizes = [1];
 let compatEnabled = false;
 let currentTabId = null;
-let dragState = null;
+let triggerDragState = null;
+let paneControlDragState = null;
+let resizeDragState = null;
 let suppressNextTriggerClick = false;
 const COMPAT_ORIGINS = { origins: ['http://*/*', 'https://*/*'] };
 
@@ -47,9 +50,7 @@ function setTriggerPosition(position) {
 
 async function persistTriggerPosition() {
   const rect = controlTrigger.getBoundingClientRect();
-  await chrome.storage.local.set({
-    floatingTriggerPosition: { x: rect.left, y: rect.top },
-  });
+  await chrome.storage.local.set({ floatingTriggerPosition: { x: rect.left, y: rect.top } });
 }
 
 function positionFloatingPanel() {
@@ -116,54 +117,88 @@ function clearSplitters() {
 function makeSplitter(orientation, index) {
   const element = document.createElement('div');
   element.className = orientation === 'col' ? 'splitter splitter-col' : 'splitter splitter-row';
-  let dragging = false;
-  let startPos = 0;
-  let sizesAtStart = [];
-
-  element.addEventListener('mousedown', (event) => {
-    dragging = true;
-    element.classList.add('dragging');
-    startPos = orientation === 'col' ? event.clientX : event.clientY;
-    sizesAtStart = orientation === 'col' ? [...colSizes] : [...rowSizes];
-    document.body.style.cursor = orientation === 'col' ? 'col-resize' : 'row-resize';
-    event.preventDefault();
-  });
-
-  window.addEventListener('mousemove', (event) => {
-    if (!dragging) return;
-    const pos = orientation === 'col' ? event.clientX : event.clientY;
-    const delta = pos - startPos;
-
-    if (orientation === 'col') {
-      const availablePx = container.clientWidth - (cols - 1) * GUTTER;
-      const unitPx = availablePx / cols;
-      const minFr = MIN_TRACK_PX / unitPx;
-      const leftFr = sizesAtStart[index] + delta / unitPx;
-      const rightFr = sizesAtStart[index + 1] - delta / unitPx;
-      if (leftFr < minFr || rightFr < minFr) return;
-      colSizes[index] = leftFr;
-      colSizes[index + 1] = rightFr;
-    } else {
-      const availablePx = container.clientHeight - (rows - 1) * GUTTER;
-      const unitPx = availablePx / rows;
-      const minFr = MIN_TRACK_PX / unitPx;
-      const topFr = sizesAtStart[index] + delta / unitPx;
-      const bottomFr = sizesAtStart[index + 1] - delta / unitPx;
-      if (topFr < minFr || bottomFr < minFr) return;
-      rowSizes[index] = topFr;
-      rowSizes[index + 1] = bottomFr;
-    }
-    applyGridTemplate();
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (!dragging) return;
-    dragging = false;
-    element.classList.remove('dragging');
-    document.body.style.cursor = '';
-  });
-
+  element.dataset.orientation = orientation;
+  element.dataset.index = String(index);
+  element.setAttribute('role', 'separator');
+  element.setAttribute('aria-orientation', orientation === 'col' ? 'vertical' : 'horizontal');
   return element;
+}
+
+function getResizeMetrics(orientation, index) {
+  const sizes = orientation === 'col' ? colSizes : rowSizes;
+  const count = orientation === 'col' ? cols : rows;
+  const availablePx = (orientation === 'col' ? container.clientWidth : container.clientHeight) - (count - 1) * GUTTER;
+  const totalFr = sizes.reduce((sum, value) => sum + value, 0);
+  const frPerPx = totalFr / Math.max(1, availablePx);
+  const minFr = MIN_TRACK_PX * frPerPx;
+  return {
+    sizes: [...sizes],
+    frPerPx,
+    minDelta: -Math.max(0, (sizes[index] - minFr) / frPerPx),
+    maxDelta: Math.max(0, (sizes[index + 1] - minFr) / frPerPx),
+  };
+}
+
+function beginResize(event, splitter) {
+  if (event.button !== 0 || resizeDragState) return;
+  const orientation = splitter.dataset.orientation;
+  const index = Number(splitter.dataset.index);
+  const metrics = getResizeMetrics(orientation, index);
+  resizeDragState = {
+    pointerId: event.pointerId,
+    orientation,
+    index,
+    splitter,
+    startPos: orientation === 'col' ? event.clientX : event.clientY,
+    latestDelta: 0,
+    rafId: null,
+    ...metrics,
+  };
+  splitter.setPointerCapture(event.pointerId);
+  splitter.classList.add('dragging');
+  document.body.classList.add('resizing');
+  document.body.style.cursor = orientation === 'col' ? 'col-resize' : 'row-resize';
+  event.preventDefault();
+}
+
+function renderResizePreview() {
+  if (!resizeDragState) return;
+  resizeDragState.rafId = null;
+  const { orientation, splitter, latestDelta } = resizeDragState;
+  splitter.style.transform = orientation === 'col'
+    ? `translate3d(${latestDelta}px, 0, 0)`
+    : `translate3d(0, ${latestDelta}px, 0)`;
+}
+
+function moveResize(event) {
+  if (!resizeDragState || event.pointerId !== resizeDragState.pointerId) return;
+  const position = resizeDragState.orientation === 'col' ? event.clientX : event.clientY;
+  const rawDelta = position - resizeDragState.startPos;
+  resizeDragState.latestDelta = MPV.clamp(rawDelta, resizeDragState.minDelta, resizeDragState.maxDelta);
+  if (resizeDragState.rafId == null) resizeDragState.rafId = requestAnimationFrame(renderResizePreview);
+  event.preventDefault();
+}
+
+function finishResize(event) {
+  if (!resizeDragState || event.pointerId !== resizeDragState.pointerId) return;
+  const state = resizeDragState;
+  if (state.rafId != null) cancelAnimationFrame(state.rafId);
+
+  const deltaFr = state.latestDelta * state.frPerPx;
+  const next = [...state.sizes];
+  next[state.index] += deltaFr;
+  next[state.index + 1] -= deltaFr;
+  if (state.orientation === 'col') colSizes = next;
+  else rowSizes = next;
+
+  state.splitter.style.transform = '';
+  state.splitter.classList.remove('dragging');
+  if (state.splitter.hasPointerCapture(event.pointerId)) state.splitter.releasePointerCapture(event.pointerId);
+  resizeDragState = null;
+  document.body.classList.remove('resizing');
+  document.body.style.cursor = '';
+  applyGridTemplate();
+  requestAnimationFrame(clampAllPaneControls);
 }
 
 function updatePaneCountUi() {
@@ -172,6 +207,64 @@ function updatePaneCountUi() {
   triggerPaneCount.textContent = String(count);
   addBtn.disabled = count >= MAX_PANES;
   if (!floatingPanel.hidden) requestAnimationFrame(positionFloatingPanel);
+}
+
+function clampPaneControl(pane, position = pane.controlPosition || { x: PANE_CONTROL_PADDING, y: PANE_CONTROL_PADDING }) {
+  const width = pane.wrapper.clientWidth;
+  const height = pane.wrapper.clientHeight;
+  const controlWidth = pane.control.offsetWidth;
+  const controlHeight = pane.control.offsetHeight;
+  const maxX = Math.max(PANE_CONTROL_PADDING, width - controlWidth - PANE_CONTROL_PADDING);
+  const maxY = Math.max(PANE_CONTROL_PADDING, height - controlHeight - PANE_CONTROL_PADDING);
+  const clamped = {
+    x: MPV.clamp(position.x, PANE_CONTROL_PADDING, maxX),
+    y: MPV.clamp(position.y, PANE_CONTROL_PADDING, maxY),
+  };
+  pane.controlPosition = clamped;
+  pane.control.style.left = `${clamped.x}px`;
+  pane.control.style.top = `${clamped.y}px`;
+  return clamped;
+}
+
+function clampAllPaneControls() {
+  panes.forEach((pane) => clampPaneControl(pane));
+}
+
+function beginPaneControlDrag(pane, event) {
+  if (event.button !== 0 || paneControlDragState || resizeDragState) return;
+  const rect = pane.control.getBoundingClientRect();
+  const wrapperRect = pane.wrapper.getBoundingClientRect();
+  paneControlDragState = {
+    pane,
+    pointerId: event.pointerId,
+    captureTarget: event.currentTarget,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: rect.left - wrapperRect.left,
+    originY: rect.top - wrapperRect.top,
+  };
+  event.currentTarget.setPointerCapture(event.pointerId);
+  pane.control.classList.add('dragging');
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function movePaneControl(event) {
+  if (!paneControlDragState || event.pointerId !== paneControlDragState.pointerId) return;
+  const state = paneControlDragState;
+  clampPaneControl(state.pane, {
+    x: state.originX + event.clientX - state.startX,
+    y: state.originY + event.clientY - state.startY,
+  });
+  event.preventDefault();
+}
+
+function endPaneControlDrag(event) {
+  if (!paneControlDragState || event.pointerId !== paneControlDragState.pointerId) return;
+  const state = paneControlDragState;
+  if (state.captureTarget.hasPointerCapture(event.pointerId)) state.captureTarget.releasePointerCapture(event.pointerId);
+  state.pane.control.classList.remove('dragging');
+  paneControlDragState = null;
 }
 
 function layoutPanes() {
@@ -189,6 +282,7 @@ function layoutPanes() {
     const col = index % cols;
     pane.wrapper.style.gridColumn = `${2 * col + 1}`;
     pane.wrapper.style.gridRow = `${2 * row + 1}`;
+    pane.indexLabel.textContent = String(index + 1);
   });
 
   const lastRowStartIndex = (rows - 1) * cols;
@@ -215,35 +309,12 @@ function layoutPanes() {
   }
 
   updatePaneCountUi();
+  requestAnimationFrame(clampAllPaneControls);
 }
 
 function createPane(url) {
   const wrapper = document.createElement('div');
   wrapper.className = 'pane';
-
-  const toolbar = document.createElement('div');
-  toolbar.className = 'pane-toolbar';
-
-  const urlInput = document.createElement('input');
-  urlInput.className = 'pane-url';
-  urlInput.type = 'text';
-  urlInput.value = url;
-  urlInput.placeholder = 'Enter URL or search';
-  urlInput.setAttribute('aria-label', 'Pane URL');
-
-  const reloadBtn = document.createElement('button');
-  reloadBtn.type = 'button';
-  reloadBtn.textContent = '⟳';
-  reloadBtn.title = 'Refresh pane';
-  reloadBtn.setAttribute('aria-label', 'Refresh pane');
-
-  const closeBtn = document.createElement('button');
-  closeBtn.type = 'button';
-  closeBtn.textContent = '✕';
-  closeBtn.title = 'Close pane';
-  closeBtn.setAttribute('aria-label', 'Close pane');
-
-  toolbar.append(urlInput, reloadBtn, closeBtn);
 
   const iframe = document.createElement('iframe');
   iframe.className = 'pane-iframe';
@@ -251,15 +322,76 @@ function createPane(url) {
   iframe.src = MPV.normalizeUrl(url);
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups');
 
-  wrapper.append(toolbar, iframe);
+  const control = document.createElement('div');
+  control.className = 'pane-control';
 
+  const grip = document.createElement('button');
+  grip.type = 'button';
+  grip.className = 'pane-control-grip';
+  grip.title = 'Drag pane controls';
+  grip.setAttribute('aria-label', 'Drag pane controls');
+
+  const gripMark = document.createElement('span');
+  gripMark.className = 'pane-control-grip-mark';
+  gripMark.textContent = '••';
+  gripMark.setAttribute('aria-hidden', 'true');
+
+  const indexLabel = document.createElement('span');
+  indexLabel.className = 'pane-control-index';
+  indexLabel.textContent = '?';
+  indexLabel.setAttribute('aria-hidden', 'true');
+  grip.append(gripMark, indexLabel);
+
+  const details = document.createElement('div');
+  details.className = 'pane-control-details';
+
+  const urlInput = document.createElement('input');
+  urlInput.className = 'pane-url';
+  urlInput.type = 'text';
+  urlInput.value = url;
+  urlInput.placeholder = 'URL or search';
+  urlInput.setAttribute('aria-label', 'Pane URL');
+
+  const reloadBtn = document.createElement('button');
+  reloadBtn.type = 'button';
+  reloadBtn.className = 'pane-control-action';
+  reloadBtn.textContent = '↻';
+  reloadBtn.title = 'Refresh pane';
+  reloadBtn.setAttribute('aria-label', 'Refresh pane');
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'pane-control-action close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close pane';
+  closeBtn.setAttribute('aria-label', 'Close pane');
+
+  details.append(urlInput, reloadBtn, closeBtn);
+  control.append(grip, details);
+  wrapper.append(iframe, control);
+
+  const pane = {
+    wrapper,
+    iframe,
+    control,
+    grip,
+    indexLabel,
+    controlPosition: { x: PANE_CONTROL_PADDING, y: PANE_CONTROL_PADDING },
+  };
+
+  grip.addEventListener('pointerdown', (event) => beginPaneControlDrag(pane, event));
+  grip.addEventListener('pointermove', movePaneControl);
+  grip.addEventListener('pointerup', endPaneControlDrag);
+  grip.addEventListener('pointercancel', endPaneControlDrag);
+  control.addEventListener('pointerenter', () => requestAnimationFrame(() => clampPaneControl(pane)));
+  control.addEventListener('focusin', () => requestAnimationFrame(() => clampPaneControl(pane)));
   urlInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') goTo(iframe, urlInput);
   });
   reloadBtn.addEventListener('click', () => reloadIframe(iframe));
   closeBtn.addEventListener('click', () => removePane(wrapper));
 
-  return { wrapper, iframe };
+  return pane;
 }
 
 function removePane(wrapper) {
@@ -293,10 +425,7 @@ async function enableCompatRules() {
           { header: 'content-security-policy-report-only', operation: 'remove' },
         ],
       },
-      condition: {
-        tabIds: [currentTabId],
-        resourceTypes: ['sub_frame'],
-      },
+      condition: { tabIds: [currentTabId], resourceTypes: ['sub_frame'] },
     }],
   });
   compatEnabled = true;
@@ -331,7 +460,7 @@ async function toggleCompat() {
 function beginTriggerDrag(event) {
   if (event.button !== 0) return;
   const rect = controlTrigger.getBoundingClientRect();
-  dragState = {
+  triggerDragState = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
@@ -345,11 +474,11 @@ function beginTriggerDrag(event) {
 }
 
 function moveTrigger(event) {
-  if (!dragState || event.pointerId !== dragState.pointerId) return;
-  const dx = event.clientX - dragState.startX;
-  const dy = event.clientY - dragState.startY;
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.moved = true;
-  const position = setTriggerPosition({ x: dragState.originX + dx, y: dragState.originY + dy });
+  if (!triggerDragState || event.pointerId !== triggerDragState.pointerId) return;
+  const dx = event.clientX - triggerDragState.startX;
+  const dy = event.clientY - triggerDragState.startY;
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) triggerDragState.moved = true;
+  const position = setTriggerPosition({ x: triggerDragState.originX + dx, y: triggerDragState.originY + dy });
   if (!floatingPanel.hidden) {
     floatingPanel.style.left = `${position.x}px`;
     requestAnimationFrame(positionFloatingPanel);
@@ -357,11 +486,11 @@ function moveTrigger(event) {
 }
 
 async function endTriggerDrag(event) {
-  if (!dragState || event.pointerId !== dragState.pointerId) return;
-  const moved = dragState.moved;
+  if (!triggerDragState || event.pointerId !== triggerDragState.pointerId) return;
+  const moved = triggerDragState.moved;
   if (controlTrigger.hasPointerCapture(event.pointerId)) controlTrigger.releasePointerCapture(event.pointerId);
   controlTrigger.classList.remove('dragging');
-  dragState = null;
+  triggerDragState = null;
   if (moved) suppressNextTriggerClick = true;
   await persistTriggerPosition();
   if (!floatingPanel.hidden) positionFloatingPanel();
@@ -378,6 +507,14 @@ controlTrigger.addEventListener('click', () => {
   }
   toggleFloatingPanel();
 });
+
+container.addEventListener('pointerdown', (event) => {
+  const splitter = event.target.closest('.splitter');
+  if (splitter && container.contains(splitter)) beginResize(event, splitter);
+});
+window.addEventListener('pointermove', moveResize);
+window.addEventListener('pointerup', finishResize);
+window.addEventListener('pointercancel', finishResize);
 
 addBtn.addEventListener('click', () => {
   const url = prompt('Enter URL for new pane:');
@@ -402,11 +539,8 @@ window.addEventListener('resize', () => {
   const rect = controlTrigger.getBoundingClientRect();
   setTriggerPosition({ x: rect.left, y: rect.top });
   persistTriggerPosition().catch((error) => console.error('Could not save trigger position:', error));
+  clampAllPaneControls();
   if (!floatingPanel.hidden) requestAnimationFrame(positionFloatingPanel);
-});
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.theme) MPV.applyTheme(changes.theme.newValue);
 });
 
 chrome.tabs.getCurrent(async (tab) => {
@@ -420,18 +554,12 @@ chrome.tabs.getCurrent(async (tab) => {
 });
 
 async function initFloatingUi() {
-  await MPV.loadTheme();
   const result = await chrome.storage.local.get(['floatingTriggerPosition']);
   const rect = controlTrigger.getBoundingClientRect();
   const stored = result.floatingTriggerPosition;
-  const defaultPosition = {
-    x: window.innerWidth - rect.width - 18,
-    y: 18,
-  };
+  const defaultPosition = { x: window.innerWidth - rect.width - 18, y: 18 };
   setTriggerPosition(
-    stored && Number.isFinite(stored.x) && Number.isFinite(stored.y)
-      ? stored
-      : defaultPosition,
+    stored && Number.isFinite(stored.x) && Number.isFinite(stored.y) ? stored : defaultPosition,
   );
 }
 
