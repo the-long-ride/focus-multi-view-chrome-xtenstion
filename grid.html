@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Split View</title>
+  <link rel="stylesheet" href="grid.css">
+</head>
+<body>
+  <div id="panesContainer"></div>
+
+  <button id="controlTrigger" type="button" aria-haspopup="dialog" aria-expanded="false" title="Split view controls — drag to move">
+    <span class="trigger-grip" aria-hidden="true">⠿</span>
+    <span class="trigger-label">Split</span>
+    <span id="triggerPaneCount" class="trigger-count">0</span>
+  </button>
+
+  <section id="floatingPanel" class="floating-panel" role="dialog" aria-label="Split view controls" hidden>
+    <div class="panel-header">
+      <div>
+        <div class="panel-eyebrow">Split view</div>
+        <div id="paneCountLabel" class="panel-title">0 panes</div>
+      </div>
+      <span class="panel-hint">Drag the button to move</span>
+    </div>
+    <div class="panel-actions">
+      <button id="addPane" class="panel-button" type="button">
+        <span aria-hidden="true">＋</span>
+        <span>Add Pane</span>
+      </button>
+      <button
+        id="compatToggle"
+        class="panel-button compat-button"
+        type="button"
+        title="Removes framing-block headers for sites loaded in this tab only. Some sites may still fail due to script blocking or strict cookie policies."
+      >
+        <span class="compat-dot" aria-hidden="true"></span>
+        <span>Compatibility: Off</span>
+      </button>
+    </div>
+  </section>
+
+  <script src="common.js"></script>
+  <script src="grid.js"></script>
+</body>
+</html>
