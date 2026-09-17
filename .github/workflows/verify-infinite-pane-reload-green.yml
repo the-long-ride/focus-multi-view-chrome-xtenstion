@@ -1,0 +1,28 @@
+name: verify-infinite-pane-reload-green
+on:
+  push:
+    branches:
+      - verify/infinite-pane-reload-green
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Full tests
+        run: node --test tests/*.test.js
+      - name: Syntax checks
+        run: |
+          node --check common.js
+          node --check popup.js
+          node --check grid.js
+          node --check pane-bootstrap.js
+          node --check src/workspace/workspace-store.js
+          node --check src/background/workspace-frame-registry.js
+          node --check src/background/frame-registry.js
+          node --check src/background/popup-router.js
+          node --check src/background/service-worker.js
+          node --check src/pane/bridge.js
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
