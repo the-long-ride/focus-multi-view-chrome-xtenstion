@@ -49,7 +49,7 @@ test('workspace retention is bounded to approved limits', () => {
   assert.match(store, /const MAX_HISTORY_ENTRIES = 50;/);
   assert.match(store, /const MAX_CLOSED_WORKSPACES = 20;/);
   assert.match(store, /const SOFT_BUDGET_BYTES = 6 \* 1024 \* 1024;/);
-  assert.match(store, /getBytesInUse\(\[INDEX_KEY,/);
+  assert.match(store, /const keys = \[INDEX_KEY, \.\.\.\(await this\.workspaceKeys\(\)\)\];[\s\S]*this\.getBytesInUse\(keys\)/);
 });
 
 test('retained Back and Forward are universal workspace history controls', () => {
