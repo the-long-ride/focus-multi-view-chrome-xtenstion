@@ -15,8 +15,9 @@ test('grid uses floating global controls and full viewport panes', () => {
   assert.match(css, /#controlTrigger\s*\{[^}]*position:\s*fixed/s);
 });
 
-test('global controls persist their draggable position and keep the panel in the viewport', () => {
+test('global controls persist per-workspace position and keep the panel in viewport', () => {
   assert.match(js, /floatingTriggerPosition/);
+  assert.match(js, /sendWorkspaceUiPatch\(\{\s*ui:\s*\{\s*floatingTriggerPosition/s);
   assert.match(js, /computeFloatingPanelPosition/);
   assert.match(js, /clampFloatingPosition/);
   assert.match(js, /beginTriggerDrag/);
@@ -27,26 +28,40 @@ test('each pane uses a draggable compact control pill instead of a full-width ho
   assert.match(js, /pane-control-grip/);
   assert.match(js, /beginPaneControlDrag/);
   assert.match(js, /clampPaneControl/);
+  assert.match(js, /mpv:workspace-pane-patch/);
   assert.match(css, /\.pane-control\s*\{[^}]*position:\s*absolute/s);
   assert.match(css, /\.pane-control-grip\s*\{/s);
   assert.equal(css.includes('.pane:hover .pane-toolbar'), false);
 });
 
-test('pane controls preserve address navigation, refresh, and close behavior', () => {
+test('pane controls preserve address navigation, refresh, close, and retained history', () => {
   assert.match(js, /urlInput\.addEventListener\('keydown'/);
-  assert.match(js, /reloadBtn\.addEventListener\('click',\s*\(\)\s*=>\s*reloadIframe\(iframe\)\)/s);
-  assert.match(js, /closeBtn\.addEventListener\('click',\s*\(\)\s*=>\s*removePane\(wrapper\)\)/s);
+  assert.match(js, /reloadBtn\.addEventListener\('click',\s*\(\)\s*=>\s*reloadPane\(pane\)\)/s);
+  assert.match(js, /closeBtn\.addEventListener\('click'/);
+  assert.match(js, /mpv:workspace-pane-remove/);
+  assert.match(js, /mpv:history-traverse/);
+  assert.match(js, /backBtn\.addEventListener/);
+  assert.match(js, /forwardBtn\.addEventListener/);
   assert.match(js, /reloadBtn\.title\s*=\s*'Refresh pane'/);
   assert.match(css, /\.pane-iframe\s*\{[^}]*height:\s*100%/s);
 });
 
-test('splitter resize previews with transforms and commits the grid at pointer release', () => {
+test('grid restores stable pane ids through extension bootstrap URLs', () => {
+  assert.match(js, /options\.paneId \|\| crypto\.randomUUID\(\)/);
+  assert.match(js, /focus-pane:\$\{paneId\}/);
+  assert.match(js, /bootstrapUrlForPane/);
+  assert.match(js, /mpv:pane-bootstrap-ready/);
+  assert.match(js, /mpv:pane-bootstrap-target/);
+});
+
+test('splitter resize previews with transforms and persists only at pointer release', () => {
   assert.match(js, /resizeDragState/);
   assert.match(js, /function beginResize/);
   assert.match(js, /function moveResize/);
   assert.match(js, /function finishResize/);
   assert.match(js, /requestAnimationFrame\(renderResizePreview\)/);
   assert.match(js, /style\.transform/);
+  assert.match(js, /sendWorkspaceUiPatch\(\{\s*layout:/s);
   assert.match(js, /container\.addEventListener\('pointerdown'/);
   assert.match(js, /window\.addEventListener\('pointermove'/);
   assert.match(js, /window\.addEventListener\('pointerup'/);
@@ -70,8 +85,8 @@ test('splitter gutter width is slimmed down for expansive pane viewing', () => {
   assert.ok(gutterVal <= 3, `GUTTER (${gutterVal}) should be reduced (<= 3px)`);
 });
 
-test('grid re-registers enhanced session when its dedicated worker port becomes ready', () => {
+test('grid re-registers workspace and enhanced session when worker port becomes ready', () => {
   assert.match(js, /chrome\.runtime\.connect\(\{\s*name:\s*`mpv-grid:\$\{sessionId\}`\s*\}\)/);
   assert.match(js, /message\.type === 'mpv:background-ready'/);
-  assert.match(js, /syncEnhancedSession\(\)\.catch/);
+  assert.match(js, /registerWorkspace\(\).*syncEnhancedSession/s);
 });
