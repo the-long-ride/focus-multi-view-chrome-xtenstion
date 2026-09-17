@@ -3,7 +3,6 @@
 const { MAX_PANES, MAX_TEMPLATES } = MPV;
 
 const versionEl = document.getElementById('extensionVersion');
-const themeToggle = document.getElementById('themeToggle');
 const paneCountSelect = document.getElementById('paneCountSelect');
 const paneCountButton = document.getElementById('paneCountButton');
 const paneCountValue = document.getElementById('paneCountValue');
@@ -37,18 +36,6 @@ let activeSelectIndex = 0;
 function setError(element, message = '') {
   element.textContent = message;
   element.hidden = !message;
-}
-
-function updateThemeToggle(theme) {
-  const next = theme === 'dark' ? 'light' : 'dark';
-  themeToggle.setAttribute('aria-label', `Switch to ${next} mode`);
-  themeToggle.title = `Switch to ${next} mode`;
-}
-
-async function setTheme(theme) {
-  const normalized = MPV.applyTheme(theme);
-  updateThemeToggle(normalized);
-  await chrome.storage.local.set({ theme: normalized });
 }
 
 function getMainUrlValues() {
@@ -356,11 +343,6 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !paneCountList.hidden) closePaneCountList({ focusButton: true });
 });
 
-themeToggle.addEventListener('click', async () => {
-  const current = document.documentElement.dataset.theme || 'light';
-  await setTheme(current === 'dark' ? 'light' : 'dark');
-});
-
 launchBtn.addEventListener('click', async () => {
   setError(launchError);
   await launchUrls(getMainUrlValues(), true);
@@ -386,10 +368,6 @@ templateModal.addEventListener('cancel', (event) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
-  if (changes.theme) {
-    const theme = MPV.applyTheme(changes.theme.newValue);
-    updateThemeToggle(theme);
-  }
   if (changes.templates) {
     templates = MPV.normalizeTemplates(changes.templates.newValue);
     renderTemplates();
@@ -398,9 +376,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 async function init() {
   versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
-  const theme = await MPV.loadTheme();
-  updateThemeToggle(theme);
-
   buildPaneCountList();
 
   const result = await chrome.storage.local.get(['paneCount', 'paneUrls', 'templates']);
