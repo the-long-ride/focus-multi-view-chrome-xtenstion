@@ -62,3 +62,11 @@ test('grid uses xAI dark-only tokens without theme switching', () => {
   assert.equal(js.includes('changes.theme'), false);
   assert.equal(js.includes('MPV.loadTheme'), false);
 });
+
+test('splitter gutter width is slimmed down for expansive pane viewing', () => {
+  const match = js.match(/const GUTTER = (\d+);/);
+  assert.ok(match, 'GUTTER constant found');
+  const gutterVal = Number(match[1]);
+  assert.ok(gutterVal <= 3, `GUTTER (${gutterVal}) should be reduced (<= 3px)`);
+});
+

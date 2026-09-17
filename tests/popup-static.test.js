@@ -51,3 +51,24 @@ test('popup is dark-only and no longer exposes theme state or a theme toggle', (
   assert.equal(js.includes('changes.theme'), false);
   assert.equal(js.includes('MPV.loadTheme'), false);
 });
+
+test('manifest has version 1.0.0 and registered icon assets', () => {
+  assert.equal(manifest.version, '1.0.0');
+  assert.ok(manifest.icons);
+  assert.equal(manifest.icons['16'], 'icons/icon-16.png');
+  assert.equal(manifest.icons['32'], 'icons/icon-32.png');
+  assert.equal(manifest.icons['48'], 'icons/icon-48.png');
+  assert.equal(manifest.icons['128'], 'icons/icon-128.png');
+
+  for (const size of [16, 32, 48, 128]) {
+    assert.ok(fs.existsSync(`icons/icon-${size}.png`), `icons/icon-${size}.png must exist`);
+  }
+  assert.ok(fs.existsSync('icons/icon.svg'), 'icons/icon.svg must exist');
+});
+
+test('popup header is structured in 1 line with brand logo and right-aligned version', () => {
+  assert.match(html, /<header class="app-header">[\s\S]*?<div class="header-brand">[\s\S]*?<img[^>]*class="header-logo"[\s\S]*?<span id="extensionVersion" class="version-badge">/);
+  assert.match(css, /\.app-header\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.version-badge\s*\{[^}]*margin-left:\s*auto/);
+});
+

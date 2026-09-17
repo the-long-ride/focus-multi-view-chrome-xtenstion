@@ -1,7 +1,7 @@
 'use strict';
 
 const MAX_PANES = MPV.MAX_PANES;
-const GUTTER = 6;
+const GUTTER = 2;
 const MIN_TRACK_PX = 120;
 const COMPAT_RULE_ID = 1;
 const FLOATING_PADDING = 12;
