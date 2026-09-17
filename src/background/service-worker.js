@@ -45,7 +45,11 @@ function isGridUrl(value) {
   try {
     const actual = new URL(value);
     const expected = new URL(GRID_URL);
-    return actual.origin === expected.origin && actual.pathname === expected.pathname;
+    const keys = [...actual.searchParams.keys()];
+    return actual.origin === expected.origin
+      && actual.pathname === expected.pathname
+      && keys.length <= 1
+      && keys.every((key) => key === 'workspace');
   } catch {
     return false;
   }
@@ -105,9 +109,14 @@ function queueWorkspaceMutation(workspaceId, mutation) {
   return tracked;
 }
 
-async function isLiveTab(tabId) {
+async function isLiveWorkspaceOwner(tabId, workspaceId) {
   if (!Number.isInteger(tabId)) return false;
-  try { await chrome.tabs.get(tabId); return true; } catch { return false; }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return isGridUrl(tab?.url) && workspaceIdFromGridUrl(tab.url) === workspaceId;
+  } catch {
+    return false;
+  }
 }
 
 function workspaceOwnerMatches(tabId, workspaceId) {
@@ -271,7 +280,7 @@ async function registerWorkspaceForPort(port, tabId, sessionId, requestedId, req
   let workspace = await queueWorkspaceMutation(requestedId, async () => {
     const loaded = await workspaceStore.load(requestedId);
     if (!loaded) return null;
-    if (loaded.activeTabId != null && loaded.activeTabId !== tabId && await isLiveTab(loaded.activeTabId)) {
+    if (loaded.activeTabId != null && loaded.activeTabId !== tabId && await isLiveWorkspaceOwner(loaded.activeTabId, loaded.workspaceId)) {
       cloned = true;
       const clone = await workspaceStore.clone(loaded.workspaceId);
       return clone ? workspaceStore.markActive(clone.workspaceId, tabId) : null;
