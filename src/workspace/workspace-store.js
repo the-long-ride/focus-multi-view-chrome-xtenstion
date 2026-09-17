@@ -81,6 +81,7 @@
     if (source.length <= MAX_HISTORY_ENTRIES) {
       return { ...pane, history: source, historyIndex: currentIndex };
     }
+
     const earliestStart = Math.max(0, currentIndex - (MAX_HISTORY_ENTRIES - 1));
     const latestStart = source.length - MAX_HISTORY_ENTRIES;
     const start = Math.min(earliestStart, latestStart);
@@ -95,11 +96,13 @@
     if (!value || typeof value !== 'object') return null;
     const paneId = validId(value.paneId);
     if (!paneId || !Array.isArray(value.history)) return null;
+
     const history = value.history
       .map((entry) => validHttpUrl(entry?.url))
       .filter(Boolean)
       .map((url) => ({ url }));
     if (!history.length) return null;
+
     const historyIndex = Math.min(
       Math.max(Number.isInteger(value.historyIndex) ? value.historyIndex : history.length - 1, 0),
       history.length - 1,
@@ -241,6 +244,7 @@
     const pane = workspace?.panes?.find((item) => item.paneId === paneId);
     if (!url || !pane) return { workspace, changed: false };
     if (pane.history[pane.historyIndex]?.url === url) return { workspace, changed: false };
+
     const history = pane.history.slice(0, pane.historyIndex + 1).map((entry) => ({ ...entry }));
     history.push({ url });
     const nextPane = trimPaneHistory({ ...pane, history, historyIndex: history.length - 1 });
@@ -378,14 +382,26 @@
       const workspace = await this.load(workspaceId);
       if (!workspace) return null;
       const now = this.now();
-      return this.save({ ...workspace, activeTabId: tabId, closedAt: null, lastSeenAt: now, updatedAt: now });
+      return this.save({
+        ...workspace,
+        activeTabId: tabId,
+        closedAt: null,
+        lastSeenAt: now,
+        updatedAt: now,
+      });
     }
 
     async markClosed(workspaceId) {
       const workspace = await this.load(workspaceId);
       if (!workspace) return null;
       const now = this.now();
-      return this.save({ ...workspace, activeTabId: null, closedAt: now, lastSeenAt: now, updatedAt: now });
+      return this.save({
+        ...workspace,
+        activeTabId: null,
+        closedAt: now,
+        lastSeenAt: now,
+        updatedAt: now,
+      });
     }
 
     async deleteWorkspace(workspaceId) {
@@ -402,7 +418,8 @@
     }
 
     async measuredBytes() {
-      return this.getBytesInUse([INDEX_KEY, ...(await this.workspaceKeys())]);
+      const keys = [INDEX_KEY, ...(await this.workspaceKeys())];
+      return this.getBytesInUse(keys);
     }
 
     async cleanup() {
@@ -410,6 +427,7 @@
       const closed = index
         .filter((entry) => entry.activeTabId == null && entry.closedAt != null)
         .sort((a, b) => (b.closedAt || 0) - (a.closedAt || 0));
+
       for (const entry of closed.slice(MAX_CLOSED_WORKSPACES)) {
         await this.localArea.remove(workspaceKey(entry.workspaceId));
         index = index.filter((item) => item.workspaceId !== entry.workspaceId);
