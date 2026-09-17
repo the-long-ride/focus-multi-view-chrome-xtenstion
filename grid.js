@@ -408,7 +408,6 @@ function applyWorkspaceState(snapshot, { initial = false } = {}) {
   }
   for (const pane of existingById.values()) { paneRegistry.delete(pane.id); pane.wrapper.remove(); }
   panes = desired;
-  for (const pane of panes) container.appendChild(pane.wrapper);
 
   const dims = computeDims(panes.length);
   cols = dims.cols;
