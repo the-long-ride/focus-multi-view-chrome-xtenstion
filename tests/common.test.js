@@ -90,3 +90,27 @@ test('shared helpers are dark-only and expose no persisted theme API', () => {
   assert.equal('applyTheme' in MPV, false);
   assert.equal('loadTheme' in MPV, false);
 });
+
+test('analyzeSameHostUrls accepts exact hostname matches and returns scheme-specific origins', () => {
+  assert.deepEqual(
+    MPV.analyzeSameHostUrls(['https://chatgpt.com/a', 'http://chatgpt.com/b']),
+    {
+      eligible: true,
+      hostname: 'chatgpt.com',
+      urls: ['https://chatgpt.com/a', 'http://chatgpt.com/b'],
+      origins: ['http://chatgpt.com/*', 'https://chatgpt.com/*'],
+      reason: '',
+    },
+  );
+});
+
+test('analyzeSameHostUrls rejects subdomain mismatches', () => {
+  const result = MPV.analyzeSameHostUrls(['https://app.example.com', 'https://docs.example.com']);
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'mixed-host');
+});
+
+test('sameHostPermissionOrigins requires at least two http(s) URLs', () => {
+  assert.deepEqual(MPV.sameHostPermissionOrigins(['about:blank', 'https://example.com']), []);
+  assert.deepEqual(MPV.sameHostPermissionOrigins(['https://example.com']), []);
+});

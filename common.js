@@ -35,6 +35,39 @@
     return `https://www.google.com/search?q=${encodeURIComponent(v)}`;
   }
 
+  function parseHttpUrl(value) {
+    try {
+      const url = new URL(normalizeUrl(value));
+      return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function analyzeSameHostUrls(values) {
+    const raw = Array.isArray(values) ? values : [];
+    if (raw.length < 2) return { eligible: false, hostname: '', urls: [], origins: [], reason: 'count' };
+
+    const parsed = raw.map(parseHttpUrl);
+    if (parsed.some((url) => !url)) {
+      return { eligible: false, hostname: '', urls: [], origins: [], reason: 'invalid-url' };
+    }
+
+    const hostname = parsed[0].hostname.toLowerCase();
+    if (!hostname || parsed.some((url) => url.hostname.toLowerCase() !== hostname)) {
+      return { eligible: false, hostname: '', urls: parsed.map((url) => url.href), origins: [], reason: 'mixed-host' };
+    }
+
+    const urls = parsed.map((url) => url.href);
+    const origins = [...new Set(parsed.map((url) => `${url.protocol}//${hostname}/*`))].sort();
+    return { eligible: true, hostname, urls, origins, reason: '' };
+  }
+
+  function sameHostPermissionOrigins(values) {
+    const analysis = analyzeSameHostUrls(values);
+    return analysis.eligible ? analysis.origins : [];
+  }
+
   function cleanUrls(urls) {
     if (!Array.isArray(urls)) return [];
     return urls.map((url) => String(url || '').trim()).filter(Boolean);
@@ -85,6 +118,8 @@
     clampFloatingPosition,
     computeFloatingPanelPosition,
     normalizeUrl,
+    analyzeSameHostUrls,
+    sameHostPermissionOrigins,
     normalizeTemplates,
     validateTemplateDraft,
   };

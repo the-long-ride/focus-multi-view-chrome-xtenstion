@@ -120,8 +120,10 @@ button { color: inherit; }
 .panel-button:hover { background: var(--canvas-soft); border-color: rgba(255,255,255,.42); }
 .panel-button:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
 .panel-button:disabled { opacity: .38; cursor: not-allowed; }
-.compat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); }
-.compat-button.active .compat-dot { background: var(--ink); }
+.compat-dot,
+.enhanced-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mute); }
+.compat-button.active .compat-dot,
+.enhanced-button.active .enhanced-dot { background: var(--ink); }
 
 .pane {
   overflow: hidden;
@@ -130,6 +132,7 @@ button { color: inherit; }
   position: relative;
   background: var(--canvas);
 }
+.pane.logical-active { outline: 1px solid rgba(255,255,255,.16); outline-offset: -1px; }
 .pane-iframe {
   position: absolute;
   inset: 0;
@@ -194,8 +197,8 @@ button { color: inherit; }
 }
 .pane-control:hover .pane-control-details,
 .pane-control:focus-within .pane-control-details {
-  width: min(320px, calc(100vw - 80px));
-  max-width: 320px;
+  width: min(404px, calc(100vw - 80px));
+  max-width: 404px;
   opacity: 1;
   padding-right: 3px;
 }
@@ -227,6 +230,7 @@ button { color: inherit; }
   padding: 0;
   font-size: 11px;
 }
+.pane-control-action.enhanced-only[hidden] { display: none; }
 .pane-control-action:hover { background: var(--canvas-soft); color: var(--ink); border-color: rgba(255,255,255,.32); }
 .pane-control-action:focus-visible { outline: 1px solid var(--ink); outline-offset: 1px; }
 .pane-control-action.close:hover { color: var(--sunset); }

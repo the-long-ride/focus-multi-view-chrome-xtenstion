@@ -70,3 +70,8 @@ test('splitter gutter width is slimmed down for expansive pane viewing', () => {
   assert.ok(gutterVal <= 3, `GUTTER (${gutterVal}) should be reduced (<= 3px)`);
 });
 
+test('grid re-registers enhanced session when its dedicated worker port becomes ready', () => {
+  assert.match(js, /chrome\.runtime\.connect\(\{\s*name:\s*`mpv-grid:\$\{sessionId\}`\s*\}\)/);
+  assert.match(js, /message\.type === 'mpv:background-ready'/);
+  assert.match(js, /syncEnhancedSession\(\)\.catch/);
+});
