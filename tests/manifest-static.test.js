@@ -10,3 +10,8 @@ test('manifest packages enhanced same-host runtime without making host access ma
   assert.deepEqual(manifest.optional_host_permissions, ['http://*/*', 'https://*/*']);
   assert.equal('host_permissions' in manifest, false);
 });
+
+test('workspace restore adds no sessions or unlimitedStorage permissions', () => {
+  assert.equal(manifest.permissions.includes('sessions'), false);
+  assert.equal(manifest.permissions.includes('unlimitedStorage'), false);
+});
