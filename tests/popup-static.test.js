@@ -12,7 +12,6 @@ test('popup exposes themed shell, custom selector, template table, and modal', (
     'popup.css',
     'common.js',
     'id="extensionVersion"',
-    'id="themeToggle"',
     'id="paneCountButton"',
     'id="paneCountList"',
     'id="templatesTable"',
@@ -22,11 +21,14 @@ test('popup exposes themed shell, custom selector, template table, and modal', (
   }
 });
 
-test('popup CSS defines Claude-inspired light and dark theme variables', () => {
-  assert.match(css, /--bg:/);
-  assert.match(css, /\[data-theme="dark"\]/);
+test('popup CSS uses the xAI dark-only visual system', () => {
+  assert.match(css, /--canvas:\s*#0a0a0a/i);
+  assert.match(css, /--canvas-card:\s*#191919/i);
+  assert.match(css, /--hairline:\s*#212327/i);
+  assert.match(css, /border-radius:\s*9999px/);
   assert.match(css, /\.select-list/);
   assert.match(css, /\.template-table/);
+  assert.equal(css.includes('[data-theme="dark"]'), false);
 });
 
 test('popup script reads real extension version and persists templates and launch URLs', () => {
@@ -41,4 +43,11 @@ test('popup copy and template counter reflect the 9-pane limit', () => {
   assert.match(html, /Open up to 9 sites in one resizable tab\./);
   assert.match(html, /id="templateUrlCount">2 \/ 9</);
   assert.match(manifest.description, /up to 9/i);
+});
+
+test('popup is dark-only and no longer exposes theme state or a theme toggle', () => {
+  assert.equal(html.includes('id="themeToggle"'), false);
+  assert.equal(js.includes('setTheme'), false);
+  assert.equal(js.includes('changes.theme'), false);
+  assert.equal(js.includes('MPV.loadTheme'), false);
 });
