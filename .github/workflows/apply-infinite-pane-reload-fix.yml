@@ -1,0 +1,52 @@
+name: apply-infinite-pane-reload-fix
+on:
+  push:
+    branches:
+      - verify/infinite-pane-reload-fix
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/infinite-pane-reload
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Remove live iframe reparenting
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('grid.js')
+          text = path.read_text()
+          needle = "  panes = desired;\n  for (const pane of panes) container.appendChild(pane.wrapper);\n"
+          assert text.count(needle) == 1, 'expected one live-pane reparent block'
+          path.write_text(text.replace(needle, "  panes = desired;\n", 1))
+          PY
+      - name: Regression test
+        run: node --test tests/grid-reload-regression.test.js
+      - name: Full tests
+        run: node --test tests/*.test.js
+      - name: Syntax checks
+        run: |
+          node --check common.js
+          node --check popup.js
+          node --check grid.js
+          node --check pane-bootstrap.js
+          node --check src/workspace/workspace-store.js
+          node --check src/background/workspace-frame-registry.js
+          node --check src/background/frame-registry.js
+          node --check src/background/popup-router.js
+          node --check src/background/service-worker.js
+          node --check src/pane/bridge.js
+          node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
+      - name: Commit fix
+        run: |
+          git config user.name "the-long-ride"
+          git config user.email "73347418+the-long-ride@users.noreply.github.com"
+          git add grid.js
+          git commit -m "fix: stop workspace state from reloading live panes"
+          git push origin HEAD:fix/infinite-pane-reload
