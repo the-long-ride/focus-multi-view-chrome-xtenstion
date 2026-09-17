@@ -3,7 +3,6 @@
 
   const MAX_PANES = 9;
   const MAX_TEMPLATES = 10;
-  const DEFAULT_THEME = 'light';
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
@@ -22,12 +21,8 @@
     let x = triggerRect.left;
     let y = triggerRect.bottom + gap;
 
-    if (x + panelSize.width > viewport.width - padding) {
-      x = triggerRect.right - panelSize.width;
-    }
-    if (y + panelSize.height > viewport.height - padding) {
-      y = triggerRect.top - panelSize.height - gap;
-    }
+    if (x + panelSize.width > viewport.width - padding) x = triggerRect.right - panelSize.width;
+    if (y + panelSize.height > viewport.height - padding) y = triggerRect.top - panelSize.height - gap;
 
     return clampFloatingPosition({ x, y }, panelSize, viewport, padding);
   }
@@ -69,9 +64,7 @@
     const clean = cleanUrls(urls);
     const existing = normalizeTemplates(existingTemplates);
 
-    if (!cleanName) {
-      return { valid: false, name: cleanName, urls: clean, error: 'Template name is required.' };
-    }
+    if (!cleanName) return { valid: false, name: cleanName, urls: clean, error: 'Template name is required.' };
     if (clean.length < 2 || clean.length > MAX_PANES) {
       return { valid: false, name: cleanName, urls: clean, error: 'A template must contain 2 to 9 URLs.' };
     }
@@ -85,40 +78,15 @@
     return { valid: true, name: cleanName, urls: clean, error: '' };
   }
 
-  function normalizeTheme(theme) {
-    return theme === 'dark' ? 'dark' : DEFAULT_THEME;
-  }
-
-  function applyTheme(theme) {
-    const normalized = normalizeTheme(theme);
-    if (global.document && global.document.documentElement) {
-      global.document.documentElement.dataset.theme = normalized;
-      global.document.documentElement.style.colorScheme = normalized;
-    }
-    return normalized;
-  }
-
-  async function loadTheme() {
-    if (!global.chrome || !global.chrome.storage || !global.chrome.storage.local) {
-      return applyTheme(DEFAULT_THEME);
-    }
-    const result = await global.chrome.storage.local.get(['theme']);
-    return applyTheme(normalizeTheme(result.theme));
-  }
-
   const api = {
     MAX_PANES,
     MAX_TEMPLATES,
-    DEFAULT_THEME,
     clamp,
     clampFloatingPosition,
     computeFloatingPanelPosition,
     normalizeUrl,
     normalizeTemplates,
     validateTemplateDraft,
-    normalizeTheme,
-    applyTheme,
-    loadTheme,
   };
 
   global.MPV = api;
