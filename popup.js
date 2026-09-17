@@ -1,6 +1,10 @@
 'use strict';
 
 const { MAX_PANES, MAX_TEMPLATES } = MPV;
+const workspaceStore = new MPVWorkspaceStore.WorkspaceStore({
+  localArea: chrome.storage.local,
+  getBytesInUse: (keys) => chrome.storage.local.getBytesInUse(keys),
+});
 
 const versionEl = document.getElementById('extensionVersion');
 const paneCountSelect = document.getElementById('paneCountSelect');
@@ -47,12 +51,10 @@ function renderMainUrlInputs(count, existingValues = getMainUrlValues()) {
   for (let index = 0; index < count; index += 1) {
     const row = document.createElement('div');
     row.className = 'url-row';
-
     const badge = document.createElement('span');
     badge.className = 'url-index';
     badge.textContent = String(index + 1);
     badge.setAttribute('aria-hidden', 'true');
-
     const input = document.createElement('input');
     input.className = 'url-input';
     input.type = 'text';
@@ -60,7 +62,6 @@ function renderMainUrlInputs(count, existingValues = getMainUrlValues()) {
     input.placeholder = `Pane ${index + 1} URL`;
     input.setAttribute('aria-label', `Pane ${index + 1} URL`);
     input.value = existingValues[index] || '';
-
     row.append(badge, input);
     urlInputs.appendChild(row);
   }
@@ -115,22 +116,11 @@ function buildPaneCountList() {
       closePaneCountList({ focusButton: true });
     });
     option.addEventListener('keydown', (event) => {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        focusSelectOption(activeSelectIndex + 1);
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        focusSelectOption(activeSelectIndex - 1);
-      } else if (event.key === 'Home') {
-        event.preventDefault();
-        focusSelectOption(0);
-      } else if (event.key === 'End') {
-        event.preventDefault();
-        focusSelectOption(MAX_PANES - 2);
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        closePaneCountList({ focusButton: true });
-      }
+      if (event.key === 'ArrowDown') { event.preventDefault(); focusSelectOption(activeSelectIndex + 1); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); focusSelectOption(activeSelectIndex - 1); }
+      else if (event.key === 'Home') { event.preventDefault(); focusSelectOption(0); }
+      else if (event.key === 'End') { event.preventDefault(); focusSelectOption(MAX_PANES - 2); }
+      else if (event.key === 'Escape') { event.preventDefault(); closePaneCountList({ focusButton: true }); }
     });
     paneCountList.appendChild(option);
   }
@@ -159,11 +149,14 @@ async function launchUrls(urls, rememberMainForm = false) {
   const enhancedGranted = await requestEnhancedPermissionForLaunch(cleanUrls);
   const launchEnhancedHostname = enhancedGranted && analysis.eligible ? analysis.hostname : '';
 
-  if (rememberMainForm) {
-    await chrome.storage.local.set({ paneCount, paneUrls: cleanUrls });
-  }
-  await chrome.storage.session.set({ launchUrls: cleanUrls, launchEnhancedHostname });
-  await chrome.tabs.create({ url: chrome.runtime.getURL('grid.html') });
+  if (rememberMainForm) await chrome.storage.local.set({ paneCount, paneUrls: cleanUrls });
+
+  const workspace = await workspaceStore.create(cleanUrls, {
+    ui: { enhancedOptInHostname: launchEnhancedHostname },
+  });
+  const gridUrl = new URL(chrome.runtime.getURL('grid.html'));
+  gridUrl.searchParams.set('workspace', workspace.workspaceId);
+  await chrome.tabs.create({ url: gridUrl.toString() });
 }
 
 function createActionButton(label, className, onClick) {
@@ -181,20 +174,16 @@ function renderTemplates() {
   createTemplateBtn.disabled = templates.length >= MAX_TEMPLATES;
   templatesEmpty.hidden = templates.length > 0;
   document.getElementById('templatesTable').hidden = templates.length === 0;
-
   templates.forEach((template) => {
     const row = document.createElement('tr');
-
     const nameCell = document.createElement('td');
     const name = document.createElement('div');
     name.className = 'template-name';
     name.textContent = template.name;
     name.title = template.name;
     nameCell.appendChild(name);
-
     const countCell = document.createElement('td');
     countCell.textContent = String(template.urls.length);
-
     const actionsCell = document.createElement('td');
     const actions = document.createElement('div');
     actions.className = 'table-actions';
@@ -205,7 +194,6 @@ function renderTemplates() {
       createActionButton('Delete', 'delete', () => deleteTemplate(template)),
     );
     actionsCell.appendChild(actions);
-
     row.append(nameCell, countCell, actionsCell);
     templatesBody.appendChild(row);
   });
@@ -225,16 +213,13 @@ function renderTemplateUrlInputs(values, readOnly = false) {
   const safeValues = Array.isArray(values) && values.length ? values.slice(0, MAX_PANES) : ['', ''];
   while (safeValues.length < 2) safeValues.push('');
   templateUrlInputs.innerHTML = '';
-
   safeValues.forEach((value, index) => {
     const row = document.createElement('div');
     row.className = 'template-url-row';
-
     const badge = document.createElement('span');
     badge.className = 'url-index';
     badge.textContent = String(index + 1);
     badge.setAttribute('aria-hidden', 'true');
-
     const input = document.createElement('input');
     input.className = 'url-input';
     input.type = 'text';
@@ -243,7 +228,6 @@ function renderTemplateUrlInputs(values, readOnly = false) {
     input.setAttribute('aria-label', `Template pane ${index + 1} URL`);
     input.value = value;
     input.disabled = readOnly;
-
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'remove-url-button';
@@ -256,11 +240,9 @@ function renderTemplateUrlInputs(values, readOnly = false) {
       current.splice(index, 1);
       renderTemplateUrlInputs(current, false);
     });
-
     row.append(badge, input, remove);
     templateUrlInputs.appendChild(row);
   });
-
   templateUrlCount.textContent = `${safeValues.length} / ${MAX_PANES}`;
   addTemplateUrlBtn.disabled = readOnly || safeValues.length >= MAX_PANES;
   addTemplateUrlBtn.hidden = readOnly;
@@ -270,7 +252,6 @@ function openTemplateModal(mode, template = null) {
   modalMode = mode;
   editingTemplateId = template ? template.id : null;
   setError(templateError);
-
   const isView = mode === 'view';
   const isEdit = mode === 'edit';
   templateModalEyebrow.textContent = isView ? 'Saved template' : isEdit ? 'Edit template' : 'New template';
@@ -278,16 +259,11 @@ function openTemplateModal(mode, template = null) {
   templateName.value = template?.name || '';
   templateName.disabled = isView;
   renderTemplateUrlInputs(template?.urls || getMainUrlValues().filter(Boolean).slice(0, MAX_PANES), isView);
-
   if (!templateUrlInputs.children.length) renderTemplateUrlInputs(['', ''], isView);
-
   saveTemplateBtn.hidden = isView;
   cancelTemplateBtn.textContent = isView ? 'Close' : 'Cancel';
   templateModal.showModal();
-  requestAnimationFrame(() => {
-    if (isView) cancelTemplateBtn.focus();
-    else templateName.focus();
-  });
+  requestAnimationFrame(() => (isView ? cancelTemplateBtn : templateName).focus());
 }
 
 function closeTemplateModal() {
@@ -305,65 +281,31 @@ async function deleteTemplate(template) {
 
 async function saveTemplateFromModal(event) {
   event.preventDefault();
-  if (modalMode === 'view') {
-    closeTemplateModal();
-    return;
-  }
-
-  const result = MPV.validateTemplateDraft(
-    templateName.value,
-    getTemplateUrlValues(),
-    templates,
-    editingTemplateId,
-  );
-  if (!result.valid) {
-    setError(templateError, result.error);
-    return;
-  }
-
+  if (modalMode === 'view') { closeTemplateModal(); return; }
+  const result = MPV.validateTemplateDraft(templateName.value, getTemplateUrlValues(), templates, editingTemplateId);
+  if (!result.valid) { setError(templateError, result.error); return; }
   if (modalMode === 'edit') {
     templates = templates.map((template) => (
-      template.id === editingTemplateId
-        ? { ...template, name: result.name, urls: result.urls }
-        : template
+      template.id === editingTemplateId ? { ...template, name: result.name, urls: result.urls } : template
     ));
   } else {
-    templates = [...templates, {
-      id: crypto.randomUUID(),
-      name: result.name,
-      urls: result.urls,
-    }];
+    templates = [...templates, { id: crypto.randomUUID(), name: result.name, urls: result.urls }];
   }
-
   await persistTemplates();
   closeTemplateModal();
 }
 
 paneCountButton.addEventListener('click', () => {
-  if (paneCountList.hidden) openPaneCountList();
-  else closePaneCountList();
+  if (paneCountList.hidden) openPaneCountList(); else closePaneCountList();
 });
-
 paneCountButton.addEventListener('keydown', (event) => {
-  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-    event.preventDefault();
-    openPaneCountList();
-  }
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); openPaneCountList(); }
 });
-
-document.addEventListener('click', (event) => {
-  if (!paneCountSelect.contains(event.target)) closePaneCountList();
-});
-
+document.addEventListener('click', (event) => { if (!paneCountSelect.contains(event.target)) closePaneCountList(); });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !paneCountList.hidden) closePaneCountList({ focusButton: true });
 });
-
-launchBtn.addEventListener('click', async () => {
-  setError(launchError);
-  await launchUrls(getMainUrlValues(), true);
-});
-
+launchBtn.addEventListener('click', async () => { setError(launchError); await launchUrls(getMainUrlValues(), true); });
 createTemplateBtn.addEventListener('click', () => openTemplateModal('create'));
 closeTemplateModalBtn.addEventListener('click', closeTemplateModal);
 cancelTemplateBtn.addEventListener('click', closeTemplateModal);
@@ -372,15 +314,8 @@ addTemplateUrlBtn.addEventListener('click', () => {
   if (values.length < MAX_PANES) renderTemplateUrlInputs([...values, ''], false);
 });
 templateForm.addEventListener('submit', saveTemplateFromModal);
-
-templateModal.addEventListener('click', (event) => {
-  if (event.target === templateModal) closeTemplateModal();
-});
-
-templateModal.addEventListener('cancel', (event) => {
-  event.preventDefault();
-  closeTemplateModal();
-});
+templateModal.addEventListener('click', (event) => { if (event.target === templateModal) closeTemplateModal(); });
+templateModal.addEventListener('cancel', (event) => { event.preventDefault(); closeTemplateModal(); });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
@@ -393,7 +328,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 async function init() {
   versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
   buildPaneCountList();
-
   const result = await chrome.storage.local.get(['paneCount', 'paneUrls', 'templates']);
   paneCount = Math.min(MAX_PANES, Math.max(2, Number(result.paneCount) || 2));
   setPaneCount(paneCount, { values: Array.isArray(result.paneUrls) ? result.paneUrls : [] });
