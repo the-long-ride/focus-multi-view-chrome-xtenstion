@@ -61,10 +61,12 @@
       const cleanDocumentId = cleanId(documentId);
       if (!workspace || workspace.workspaceId !== cleanWorkspaceId || !workspace.paneIds.has(cleanPaneId)) return null;
       if (!Number.isInteger(frameId) || frameId <= 0 || !cleanDocumentId) return null;
+
       const frameOwner = workspace.paneByFrame.get(frameId);
       if (frameOwner && frameOwner !== cleanPaneId) return null;
       const existing = workspace.byPane.get(cleanPaneId);
-      if (existing && existing.frameId !== frameId) return null;
+      if (existing && existing.frameId !== frameId) workspace.paneByFrame.delete(existing.frameId);
+
       const record = {
         tabId,
         workspaceId: cleanWorkspaceId,
@@ -105,7 +107,11 @@
     getWorkspace(tabId) {
       const workspace = this.workspaces.get(tabId);
       if (!workspace) return null;
-      return { tabId: workspace.tabId, workspaceId: workspace.workspaceId, paneIds: [...workspace.paneIds] };
+      return {
+        tabId: workspace.tabId,
+        workspaceId: workspace.workspaceId,
+        paneIds: [...workspace.paneIds],
+      };
     }
 
     removeFrame(tabId, frameId) {
