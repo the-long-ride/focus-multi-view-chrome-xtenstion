@@ -12,7 +12,9 @@ test('same-host launch requests only narrowed optional origins and still launche
   assert.equal(js.includes("origins: ['http://*/*', 'https://*/*']"), false);
 });
 
-test('same-host launch persists an explicit enhanced opt-in hostname separately from host permission', () => {
+test('same-host launch persists explicit enhanced opt-in in the durable workspace', () => {
   assert.match(js, /launchEnhancedHostname/);
   assert.match(js, /MPV\.analyzeSameHostUrls/);
+  assert.match(js, /ui:\s*\{\s*enhancedOptInHostname:\s*launchEnhancedHostname\s*\}/s);
+  assert.doesNotMatch(js, /chrome\.storage\.session\.set\(\{[\s\S]*launchEnhancedHostname/);
 });
