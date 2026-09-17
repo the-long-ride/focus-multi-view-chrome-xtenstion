@@ -56,3 +56,11 @@ test('enhanced synchronization restores durable opt-in and still requires existi
   assert.match(js, /currentWorkspace\.ui\?\.enhancedOptInHostname/);
   assert.match(js, /chrome\.permissions\.contains\(\{\s*origins:\s*analysis\.origins\s*\}\)/);
 });
+
+test('workspace snapshots are authoritative when enhanced opt-in is cleared', () => {
+  const start = js.indexOf('function applyWorkspaceState');
+  const end = js.indexOf('\nfunction handleGridPortMessage', start);
+  const block = js.slice(start, end);
+  assert.match(block, /setEnhancedOptIn\(snapshot\.ui\?\.enhancedOptInHostname \|\| ''\)/);
+  assert.doesNotMatch(block, /snapshot\.ui\?\.enhancedOptInHostname \|\| enhancedOptInHostname/);
+});
